@@ -2,6 +2,7 @@
 // 2-Clause BSD License
 // Modified by ea4aoj 23/04/2020
 // Modified by ea4hew 15/09/2020
+// Modified by K1BR 05/21/2022
 
 // Functioning:
 // Press the Setup button, enter the speed configuration mode, change the speed with the paddles, to exit press the Setup button again.
@@ -23,14 +24,14 @@
 
 // PINS
 
-const int pinMem1 = D1;                // Press Memorory 1
-const int pinMem2 = D2;                // Press Memoria2
-const int pinMem3 = D3;                // Press Memoria3
-const int pinSetup = D7;               // Press Setup (Ajuste velocidad y tono)
+const int pinMem1 = D1;                // Press Memory 1
+const int pinMem2 = D2;                // Press Memory 2
+const int pinMem3 = D3;                // Press Memory 3
+const int pinSetup = D7;               // Press Setup (Adjust speed and tone)
 const int pinKeyDit = D5;              // Key, dit paddle
 const int pinKeyDah = D6;              // Key, dah paddle
 const int pinStatusLed = D4;           // Led ESP8266 builin
-const int pinOnboardLed = A0;          // Led external
+const int pinDebug = D10;               // Led external
 const int pinMosfet = D0;              // Key rig jack
 const int pinSpeaker = D8;             // Speaker
 
@@ -80,6 +81,9 @@ const int storageMagic2 = 97;
 int toneFreq = 700;                     // Default sidetone frequncy
 int ditMillis = 60;                     // Default speed
 int currKeyerMode = keyerModeIambic;    // Default mode
+int iambicModeB = 1;                    // Default iambic mode
+int playAlternate = 0;                  // Mode B completion flag
+int ditDetected = 0;                    // Dit paddle hit during Dah play
 
 char memory[3][600];
 size_t memorySize[3];
@@ -92,6 +96,12 @@ int prevSymbol = 0; // 0=none, 1=dit, 2=dah
 unsigned long whenStartedPress;
 int recording = 0;
 int currStorageOffset = 0;
+
+
+void pulsePin(int pin) {
+  digitalWrite(pin, HIGH);
+  digitalWrite(pin, LOW);
+}
 
 
 void dumpSettingsToStorage();
@@ -161,6 +171,10 @@ int delayInterruptable(int ms, int *pins, int *conditions, size_t numPins) {
   
   while(1) {
     if (ms != -1 && millis() > finish) return -1;
+
+//    if (prevSymbol == symDah) {
+//      ditDetected = !digitalRead(pinKeyDit);
+//    }
 
     for (size_t i=0; i < numPins; i++) {
       if (digitalRead(pins[i]) == conditions[i]) return pins[i];
@@ -451,7 +465,7 @@ void setup() {
   pinMode(pinKeyDah, INPUT_PULLUP);
   
   pinMode(pinStatusLed, OUTPUT);
-  pinMode(pinOnboardLed, OUTPUT);
+  pinMode(pinDebug, OUTPUT);
   pinMode(pinMosfet, OUTPUT);
   pinMode(pinSpeaker, OUTPUT);
   EEPROM. begin(1024);
@@ -481,19 +495,27 @@ void loop() {
   int dahPressed = (digitalRead(pinKeyDah) == LOW);
 
   if (currState == stateIdle) {
-    if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {
+    if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
+      pulsePin(pinDebug);
       if (prevSymbol == symDah) playSym(symDit, 1);
       else playSym(symDah, 1);
-    } else if (dahPressed && currKeyerMode != keyerModeStraight) {
+      if (iambicModeB) playAlternate = 1;
+    } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
       if (currKeyerMode == keyerModeIambic) {
         playSym(symDah, 1);
       } else if (currKeyerMode == keyerModeVibroplex) {
         playStraightKey(pinKeyDah);
       }
-    } else if (ditPressed) {  
+    } else if (ditPressed) {                                              // Dit paddle
+      if (prevSymbol == symDit) ditDetected = 0;
       if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
       else playSym(symDit, 1);
-    } else {
+    } else {                                                              // No Paddle
+      if (playAlternate || ditDetected) {
+        if (prevSymbol == symDah) playSym(symDit, 1);
+        else playSym(symDah, 1);
+        playAlternate = 0;
+      }
       prevSymbol = 0;
     }
     
