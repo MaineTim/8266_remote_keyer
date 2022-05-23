@@ -24,66 +24,61 @@
 
 // PINS
 
-const int pinMem1 = D1;                // Press Memory 1
-const int pinMem2 = D2;                // Press Memory 2
-const int pinMem3 = D3;                // Press Memory 3
-const int pinSetup = D7;               // Press Setup (Adjust speed and tone)
-const int pinKeyDit = D5;              // Key, dit paddle
-const int pinKeyDah = D6;              // Key, dah paddle
-const int pinStatusLed = D4;           // Led ESP8266 builin
-const int pinDebug = D10;               // Led external
-const int pinMosfet = D0;              // Key rig jack
-const int pinSpeaker = D8;             // Speaker
+const int16_t pinDebug = D1;
+const int16_t pinSetup = D7;               // Press Setup (Adjust speed and tone)
+const int16_t pinKeyDit = D5;              // Key, dit paddle
+const int16_t pinKeyDah = D6;              // Key, dah paddle
+const int16_t pinStatusLed = D4;           // Led ESP8266 builin
+const int16_t pinMosfet = D0;              // Key rig jack
+const int16_t pinSpeaker = D8;             // Speaker
 
 
 // STATE
 
-const int stateIdle = 0;
-const int stateSettingSpeed = 1;
-const int stateSettingTone = 2;
+const int16_t stateIdle = 0;
+const int16_t stateSettingSpeed = 1;
+const int16_t stateSettingTone = 2;
 
 
 // MODE TYPES
 
-const int keyerModeIambic = 0;
-const int keyerModeVibroplex = 1;
-const int keyerModeStraight = 2;
+const int16_t keyerModeIambic = 0;
+const int16_t keyerModeVibroplex = 1;
+const int16_t keyerModeStraight = 2;
 
 
 // SYMBOLS
 
-const int symDit = 1;
-const int symDah = 2;
+const int16_t symDit = 1;
+const int16_t symDah = 2;
 
 
 // SAVE PACKET TYPES
 
-const int packetTypeEnd = 0;
-const int packetTypeSpeed = 1;
-const int packetTypeFreq = 2;
-const int packetTypeKeyerModeIambic = 3;
-const int packetTypeKeyerModeVibroplex = 4;
-const int packetTypeKeyerModeStraight = 5;
-const int packetTypeMem0 = 20;
-const int packetTypeMem1 = 21;
-const int packetTypeMem2 = 22;
+const int16_t packetTypeEnd = 0;
+const int16_t packetTypeSpeed = 1;
+const int16_t packetTypeFreq = 2;
+const int16_t packetTypeKeyerModeIambic = 3;
+const int16_t packetTypeKeyerModeVibroplex = 4;
+const int16_t packetTypeKeyerModeStraight = 5;
+const int16_t packetTypeMem0 = 20;
+const int16_t packetTypeMem1 = 21;
+const int16_t packetTypeMem2 = 22;
 
 
 // INTERNAL MEMORIES
 
-const int storageSize = 2048;
-const int storageMagic1 = 182;
-const int storageMagic2 = 97;
+const int16_t storageSize = 2048;
+const int16_t storageMagic1 = 182;
+const int16_t storageMagic2 = 97;
 
 
 // CONFIG DEFAULTS
 
-int toneFreq = 700;                     // Default sidetone frequncy
-int ditMillis = 60;                     // Default speed
-int currKeyerMode = keyerModeIambic;    // Default mode
-int iambicModeB = 1;                    // Default iambic mode
-int playAlternate = 0;                  // Mode B completion flag
-int ditDetected = 0;                    // Dit paddle hit during Dah play
+int16_t toneFreq = 700;                     // Default sidetone frequncy
+int16_t ditMillis = 60;                     // Default speed
+int16_t currKeyerMode = keyerModeIambic;    // Default mode
+int16_t iambicModeB = 1;                    // Default iambic mode
 
 char memory[3][600];
 size_t memorySize[3];
@@ -91,23 +86,39 @@ size_t memorySize[3];
 
 // RUN STATE
 
-int currState = stateIdle;
-int prevSymbol = 0; // 0=none, 1=dit, 2=dah
+int16_t currState = stateIdle;
+int16_t prevSymbol = 0; // 0=none, 1=dit, 2=dah
 unsigned long whenStartedPress;
-int recording = 0;
-int currStorageOffset = 0;
+int16_t recording = 0;
+int16_t currStorageOffset = 0;
+int16_t playAlternate = 0;                  // Mode B completion flag
+int16_t ditDetected = 0;                    // Dit paddle hit during Dah play
+int16_t memSwitch = 0;                      // Memory switch set by analogRead()
+int16_t pcount = 1000;
 
 
-void pulsePin(int pin) {
-  digitalWrite(pin, HIGH);
-  digitalWrite(pin, LOW);
+void pulsePin(int16_t pin, int16_t count) {
+  while (count-- > 0) {
+    digitalWrite(pin, HIGH);
+    digitalWrite(pin, LOW);
+  }
+}
+
+
+int16_t readAnalog() {
+  int16_t value = analogRead(PIN_A0);
+  if (value < 100) return 0;
+  else if (value > 400 && value < 600) return 1;
+  else if (value > 600 && value < 900) return 2;
+  else if (value > 900) return 3;
+  return(0);
 }
 
 
 void dumpSettingsToStorage();
 
 
-void saveStorageEmptyPacket(int type) {
+void saveStorageEmptyPacket(int16_t type) {
   if (currStorageOffset + 1 >= storageSize) {
     dumpSettingsToStorage();
     return;
@@ -119,7 +130,7 @@ void saveStorageEmptyPacket(int type) {
 }
 
 
-void saveStorageInt(int type, int value) {
+void saveStorageInt(int16_t type, int16_t value) {
   if (currStorageOffset + 1 + 2 >= storageSize) {
     dumpSettingsToStorage();
     return;
@@ -132,13 +143,13 @@ void saveStorageInt(int type, int value) {
 }
 
 
-void saveStorageMemory(int memoryId) {
+void saveStorageMemory(int16_t memoryId) {
   if (currStorageOffset + 1 + 2 + memorySize[memoryId] >= storageSize) {
     dumpSettingsToStorage();
     return;
   }
 
-  int type = 0;
+  int16_t type = 0;
   if (memoryId == 0) type = packetTypeMem0;
   else if (memoryId == 1) type = packetTypeMem1;
   else if (memoryId == 2) type = packetTypeMem2;
@@ -166,7 +177,7 @@ void dumpSettingsToStorage() {
 }
 
 
-int delayInterruptable(int ms, int *pins, int *conditions, size_t numPins) {
+int16_t delayInterruptable(int16_t ms, int16_t *pins, int16_t *conditions, size_t numPins) {
   unsigned long finish = millis() + ms;
   
   while(1) {
@@ -183,22 +194,22 @@ int delayInterruptable(int ms, int *pins, int *conditions, size_t numPins) {
 }
 
 
-void waitPin(int pin, int condition) {
-  int pins[1] = { pin };
-  int conditions[1] = { condition };
+void waitPin(int16_t pin, int16_t condition) {
+  int16_t pins[1] = { pin };
+  int16_t conditions[1] = { condition };
   delayInterruptable(-1, pins, conditions, 1);
   delay(250); // debounce
 }
 
 
-int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, size_t numPins) {
+int16_t playSymInterruptableVec(int16_t sym, int16_t transmit, int16_t *pins, int16_t *conditions, size_t numPins) {
   prevSymbol = sym;
 
   tone(pinSpeaker, toneFreq);
   digitalWrite(pinStatusLed, recording ? LOW : HIGH);
   if (transmit) digitalWrite(pinMosfet, HIGH);
   
-  int ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
+  int16_t ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
 
   noTone(pinSpeaker);
   digitalWrite(pinStatusLed, recording ? HIGH : LOW);
@@ -213,25 +224,25 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 }
 
 
-void playSym(int sym, int transmit) {
+void playSym(int16_t sym, int16_t transmit) {
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
 }
 
 
-int playSymInterruptable(int sym, int transmit, int pin, int condition) {
-  int pins[1] = { pin };
-  int conditions[1] = { condition };
+int16_t playSymInterruptable(int16_t sym, int16_t transmit, int16_t pin, int16_t condition) {
+  int16_t pins[1] = { pin };
+  int16_t conditions[1] = { condition };
   return playSymInterruptableVec(sym, transmit, pins, conditions, 1);
 }
 
 
-void memRecord(int memoryId, int value) {
+void memRecord(int16_t memoryId, int16_t value) {
   memory[memoryId][memorySize[memoryId]] = value;
   memorySize[memoryId]++;
 }
 
 
-void setMemory(int memoryId, int pin, int inverted) {
+void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
   memorySize[memoryId] = 0;
   playSym(symDah, 0);
   delay(50);
@@ -245,15 +256,15 @@ void setMemory(int memoryId, int pin, int inverted) {
   unsigned long spaceStarted = 0;
   
   while(1) {
-    int ditPressed = (digitalRead(pinKeyDit) == LOW);
-    int dahPressed = (digitalRead(pinKeyDah) == LOW);
+    int16_t ditPressed = (digitalRead(pinKeyDit) == LOW);
+    int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
 
     if ((ditPressed || dahPressed) && spaceStarted) {
       // record a space
       double spaceDuration = millis() - spaceStarted;
       spaceDuration /= ditMillis;
       spaceDuration += 2.5;
-      int toRecord = spaceDuration;
+      int16_t toRecord = spaceDuration;
       if (toRecord > 255) toRecord = 255;
       memRecord(memoryId, toRecord);
       spaceStarted = 0;
@@ -282,9 +293,9 @@ void setMemory(int memoryId, int pin, int inverted) {
 
     if (memorySize[memoryId] >= sizeof(memory[memoryId])-2) break; // protect against overflow
 
-    if (digitalRead(pin) == (inverted ? HIGH : LOW)) {
+    if (digitalRead(pinSetup) == (inverted ? HIGH : LOW)) {
       delay(50);
-      waitPin(pin, inverted ? LOW : HIGH);
+      waitPin(pinSetup, inverted ? LOW : HIGH);
       break;
     }
   }
@@ -300,7 +311,7 @@ void setMemory(int memoryId, int pin, int inverted) {
   delay(300);
   tone(pinSpeaker, 2000);
 
-  for (int i=0; i<=memoryId; i++) {
+  for (int16_t i=0; i<=memoryId; i++) {
     digitalWrite(pinStatusLed, HIGH);
     delay(150);
     digitalWrite(pinStatusLed, LOW);
@@ -311,7 +322,7 @@ void setMemory(int memoryId, int pin, int inverted) {
 }
 
 
-void playMemory(int memoryId) {
+void playMemory(int16_t memoryId) {
   if (memorySize[memoryId] == 0) {
     tone(pinSpeaker, 800);
     delay(200);
@@ -321,28 +332,28 @@ void playMemory(int memoryId) {
     return;
   }
 
-  int pins[2] = { pinKeyDit, pinKeyDah };
-  int conditions[2] = { LOW, LOW };
+  int16_t pins[2] = { pinKeyDit, pinKeyDah };
+  int16_t conditions[2] = { LOW, LOW };
 
   for (size_t i=0; i < memorySize[memoryId]; i++) {
-    int cmd = memory[memoryId][i];
+    int16_t cmd = memory[memoryId][i];
 
     if (cmd == 0) {
-      int ret = playSymInterruptableVec(symDit, 1, pins, conditions, 2);
+      int16_t ret = playSymInterruptableVec(symDit, 1, pins, conditions, 2);
       if (ret != -1) {
         delay(10);
         waitPin(ret, HIGH);
         return;
       }
     } else if (cmd == 1) {
-      int ret = playSymInterruptableVec(symDah, 1, pins, conditions, 2);
+      int16_t ret = playSymInterruptableVec(symDah, 1, pins, conditions, 2);
       if (ret != -1) {
         delay(10);
         waitPin(ret, HIGH);
         return;
       }
     } else {
-      int duration = cmd - 2;
+      int16_t duration = cmd - 2;
       duration *= ditMillis;
       delay(duration);
     }
@@ -350,15 +361,15 @@ void playMemory(int memoryId) {
 }
 
 
-void checkMemoryPin(int memoryId, int pin, int inverted) {
-  if (digitalRead(pin) == (inverted ? HIGH : LOW)) {
+void checkMemoryPin(int16_t memoryId, int16_t pin, int16_t inverted) {
+  if (readAnalog() == pin) {
     unsigned long whenStartedPress = millis();
 
-    int doingSet = 0;
+    int16_t doingSet = 0;
       
     delay(5);
         
-    while (digitalRead(pin) == (inverted ? HIGH : LOW)) {
+    while (readAnalog() == pin) {
       // 3 second long press to enter memory recording mode
       if (millis() > whenStartedPress + 1000) {
         playSym(symDit, 0);
@@ -382,16 +393,16 @@ void checkMemoryPin(int memoryId, int pin, int inverted) {
 }
 
 
-int scaleDown(int orig, double factor, int lowerLimit) {
-  int scaled = (int)((double)orig * factor);
+int16_t scaleDown(int16_t orig, double factor, int16_t lowerLimit) {
+  int16_t scaled = (int)((double)orig * factor);
   if (scaled == orig) scaled--;
   if (scaled < lowerLimit) scaled = lowerLimit;
   return scaled;
 }
 
 
-int scaleUp(int orig, double factor, int upperLimit) {
-  int scaled = (int)((double)orig * factor);
+int16_t scaleUp(int16_t orig, double factor, int16_t upperLimit) {
+  int16_t scaled = (int)((double)orig * factor);
   if (scaled == orig) scaled++;
   if (scaled > upperLimit) scaled = upperLimit;
   return scaled;
@@ -417,14 +428,14 @@ void factoryReset() {
 
 void loadStorage() {
   // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
-  int resetRequested = (digitalRead(pinMem1) == LOW && digitalRead(pinSetup) == LOW);
+  int16_t resetRequested = (readAnalog() == 1 && digitalRead(pinSetup) == LOW);
 
   if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) factoryReset();
 
   currStorageOffset = 2;
   
   while (1) {
-    int packetType = EEPROM.read(currStorageOffset);
+    int16_t packetType = EEPROM.read(currStorageOffset);
     if (packetType == packetTypeEnd) {
       break;
     } else if (packetType == packetTypeSpeed) {
@@ -440,7 +451,7 @@ void loadStorage() {
     } else if (packetType == packetTypeKeyerModeStraight) {
       currKeyerMode = keyerModeStraight;
     } else if (packetType >= packetTypeMem0 && packetType <= packetTypeMem2) {
-      int memoryId = 0;
+      int16_t memoryId = 0;
       if (packetType == packetTypeMem0) memoryId = 0;
       if (packetType == packetTypeMem1) memoryId = 1;
       if (packetType == packetTypeMem2) memoryId = 2;
@@ -457,19 +468,19 @@ void loadStorage() {
 
 
 void setup() {
-  pinMode(pinMem1, INPUT_PULLUP);
-  pinMode(pinMem2, INPUT_PULLUP);
-  pinMode(pinMem3, INPUT_PULLUP);
   pinMode(pinSetup, INPUT_PULLUP);
   pinMode(pinKeyDit, INPUT_PULLUP);
   pinMode(pinKeyDah, INPUT_PULLUP);
   
-  pinMode(pinStatusLed, OUTPUT);
   pinMode(pinDebug, OUTPUT);
+  digitalWrite(pinDebug, LOW);
+  pinMode(pinStatusLed, OUTPUT);
   pinMode(pinMosfet, OUTPUT);
   pinMode(pinSpeaker, OUTPUT);
   EEPROM. begin(1024);
   loadStorage();
+
+  Serial.begin(115200);
 
   playSym(symDit, 0);
   playSym(symDah, 0);
@@ -477,7 +488,7 @@ void setup() {
 }
 
 
-void playStraightKey(int releasePin) {
+void playStraightKey(int16_t releasePin) {
   tone(pinSpeaker, toneFreq);
   digitalWrite(pinStatusLed, HIGH);
   digitalWrite(pinMosfet, HIGH);
@@ -491,12 +502,14 @@ void playStraightKey(int releasePin) {
 
 
 void loop() {
-  int ditPressed = (digitalRead(pinKeyDit) == LOW);
-  int dahPressed = (digitalRead(pinKeyDah) == LOW);
+  int16_t A0_switch = 0;
+
+  int16_t ditPressed = (digitalRead(pinKeyDit) == LOW);
+  int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
 
   if (currState == stateIdle) {
+    A0_switch = readAnalog();
     if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
-      pulsePin(pinDebug);
       if (prevSymbol == symDah) playSym(symDit, 1);
       else playSym(symDah, 1);
       if (iambicModeB) playAlternate = 1;
@@ -522,7 +535,7 @@ void loop() {
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
       unsigned long whenStartedPress = millis();
-      int nextState = stateSettingSpeed;
+      int16_t nextState = stateSettingSpeed;
       
       delay(5);
         
@@ -532,8 +545,9 @@ void loop() {
           digitalWrite(pinStatusLed, HIGH);
           nextState = stateSettingTone;
         }
+        A0_switch = readAnalog();
         // While in speed set mode we press Memory1, it changes to paddle keyer
-        if (digitalRead(pinMem1) == LOW) {
+        if (A0_switch == 1) {
           playSym(symDit, 0);
           playSym(symDit, 0);
           currKeyerMode = keyerModeIambic;
@@ -543,7 +557,7 @@ void loop() {
           break;
         }
         // While in speed set mode we press Memory2, it changes to straight key
-        if (digitalRead(pinMem2) == LOW) {
+        if (A0_switch == 2) {
           playSym(symDit, 0);
           playSym(symDit, 0);
           playSym(symDit, 0);
@@ -554,7 +568,7 @@ void loop() {
           break;
         }
         // While in speed set mode we press Memory3, it changes to Vibroplex
-        if (digitalRead(pinMem3) == LOW) {
+        if (A0_switch == 3) {
           playSym(symDit, 0);
           playSym(symDit, 0);
           playSym(symDit, 0);
@@ -573,9 +587,9 @@ void loop() {
       delay(50);
     }
 
-    checkMemoryPin(0, pinMem1, 0);
-    checkMemoryPin(1, pinMem2, 0);
-    checkMemoryPin(2, pinMem3, 0);
+    checkMemoryPin(0, 1, 0);
+    checkMemoryPin(1, 2, 0);
+    checkMemoryPin(2, 3, 0);
   } else if (currState == stateSettingSpeed) {
     if (playSymInterruptable(symDit, 0, pinSetup, LOW) != -1) {
       currState = stateIdle;
