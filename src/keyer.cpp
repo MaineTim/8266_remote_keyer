@@ -18,6 +18,10 @@
 // To exit the advanced configuration, press the Setup button.
 
 
+// 2022-05-22 - Translate comments and configure for Platformio. Add inital Iambic Mode B code.
+// 2022-05-23 - Move memory switches to A0.
+
+
 #include <Arduino.h>
 #include <EEPROM.h>
 
@@ -179,14 +183,13 @@ void dumpSettingsToStorage() {
 
 int16_t delayInterruptable(int16_t ms, int16_t *pins, int16_t *conditions, size_t numPins) {
   unsigned long finish = millis() + ms;
-  
+
   while(1) {
     if (ms != -1 && millis() > finish) return -1;
 
-//    if (prevSymbol == symDah) {
-//      ditDetected = !digitalRead(pinKeyDit);
-//    }
-
+    if (prevSymbol == symDah) {
+      if (!ditDetected) { ditDetected = !digitalRead(pinKeyDit); }
+    }
     for (size_t i=0; i < numPins; i++) {
       if (digitalRead(pins[i]) == conditions[i]) return pins[i];
     }
@@ -509,8 +512,14 @@ void loop() {
 
   if (currState == stateIdle) {
     A0_switch = readAnalog();
+    if (ditDetected) {
+      playSym(symDit, 1);
+      ditDetected = 0;
+      playAlternate = 0;
+      ditPressed = 0;
+    }
     if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
-      if (prevSymbol == symDah) playSym(symDit, 1);
+      if (prevSymbol == symDah) { playSym(symDit, 1); }
       else playSym(symDah, 1);
       if (iambicModeB) playAlternate = 1;
     } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
@@ -522,10 +531,10 @@ void loop() {
     } else if (ditPressed) {                                              // Dit paddle
       if (prevSymbol == symDit) ditDetected = 0;
       if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
-      else playSym(symDit, 1);
+      else { playSym(symDit, 1); }
     } else {                                                              // No Paddle
-      if (playAlternate || ditDetected) {
-        if (prevSymbol == symDah) playSym(symDit, 1);
+      if (playAlternate) {
+        if (prevSymbol == symDah) { playSym(symDit, 1); }
         else playSym(symDah, 1);
         playAlternate = 0;
       }
