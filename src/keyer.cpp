@@ -20,6 +20,8 @@
 
 // 2022-05-22 - Translate comments and configure for Platformio. Add inital Iambic Mode B code.
 // 2022-05-23 - Move memory switches to A0.
+// 2022-05-24 - Fixed dot completion.
+// 2022-05-25 - Create processPaddles(), use it for both main loop and memory recording.
 
 
 #include <Arduino.h>
@@ -110,7 +112,8 @@ int16_t pcount = 1000;
 // FORWARD DECLARATIONS
 
 void dumpSettingsToStorage();
-void keyer_loop(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t record);
+void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t memoryId);
+void memRecord(int16_t memoryId, int16_t value);
 
 
 // LOW LEVEL FUNCTIONS
@@ -260,8 +263,9 @@ int16_t playSymInterruptableVec(int16_t sym, int16_t transmit, int16_t *pins, in
 }
 
 
-void playSym(int16_t sym, int16_t transmit) {
+void playSym(int16_t sym, int16_t transmit, int16_t memoryId, int16_t toRecord) {
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
+  if (memoryId) memRecord(memoryId, toRecord);
 }
 
 
@@ -282,11 +286,11 @@ void memRecord(int16_t memoryId, int16_t value) {
 
 void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
   memorySize[memoryId] = 0;
-  playSym(symDah, SPKR);
+  playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
-  playSym(symDah, SPKR);
+  playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
-  playSym(symDah, SPKR);
+  playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
   digitalWrite(pinStatusLed, HIGH);
   recording = 1;
@@ -308,25 +312,11 @@ void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
       spaceStarted = 0;
     }
 
-    if (ditPressed && dahPressed) {
-      if (prevSymbol == symDah) {
-        playSym(symDit, SPKR);
-        memRecord(memoryId, 0);
-      } else {
-        playSym(symDah, SPKR);
-        memRecord(memoryId, 1);
-      }
-    } else if (ditPressed) {
-      playSym(symDit, SPKR);
-      memRecord(memoryId, 0);
-    } else if (dahPressed) {
-      playSym(symDah, SPKR);
-      memRecord(memoryId, 1);
-    } else {
-      if (prevSymbol) {
-        spaceStarted = millis();
-        prevSymbol = 0;
-      }
+    processPaddles(ditPressed, dahPressed, SPKR, memoryId);
+
+    if (prevSymbol) {
+      spaceStarted = millis();
+      prevSymbol = 0;
     }
 
     if (memorySize[memoryId] >= sizeof(memory[memoryId])-2) break; // protect against overflow
@@ -410,13 +400,13 @@ void checkMemoryPin(int16_t memoryId, int16_t pin, int16_t inverted) {
     while (readAnalog() == pin) {
       // 3 second long press to enter memory recording mode
       if (millis() > whenStartedPress + 1000) {
-        playSym(symDit, 0);
+        playSym(symDit, SPKR, NO_REC, 0);
         delay(500);
-        playSym(symDit, 0);
+        playSym(symDit, SPKR, NO_REC, 0);
         delay(500);
-        playSym(symDit, 0);
+        playSym(symDit, SPKR, NO_REC, 0);
         delay(500);
-        playSym(symDit, 0);
+        playSym(symDit, SPKR, NO_REC, 0);
         digitalWrite(pinStatusLed, HIGH);
         doingSet = 1;
       }
@@ -526,40 +516,40 @@ void setup() {
 
 
 
-  playSym(symDit, SPKR);
-  playSym(symDah, SPKR);
-  playSym(symDit, SPKR);
+  playSym(symDit, SPKR, NO_REC, 0);
+  playSym(symDah, SPKR, NO_REC, 0);
+  playSym(symDit, SPKR, NO_REC, 0);
 }
 
 
-// SYMBOL AQUISITIOM FUNCTIONS
+// SYMBOL AQUISITION FUNCTIONS
 
-void keyer_loop(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t record) {
+void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t memoryId) {
 
   if (ditDetected) {
-    playSym(symDit, TX);
+    playSym(symDit, TX, memoryId, 0);
     ditDetected = 0;
     playAlternate = 0;
     ditPressed = 0;
   }
   if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
-    if (prevSymbol == symDah) { playSym(symDit, TX); }
-    else playSym(symDah, TX);
+    if (prevSymbol == symDah) { playSym(symDit, TX, memoryId, 0); }
+    else playSym(symDah, TX, memoryId, 1);
     if (iambicModeB) playAlternate = 1;
   } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
     if (currKeyerMode == keyerModeIambic) {
-      playSym(symDah, TX);
+      playSym(symDah, TX, memoryId, 1);
     } else if (currKeyerMode == keyerModeVibroplex) {
       playStraightKey(pinKeyDah);
     }
   } else if (ditPressed) {                                              // Dit paddle
     if (prevSymbol == symDit) ditDetected = 0;
     if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
-    else { playSym(symDit, TX); }
+    else { playSym(symDit, TX, memoryId, 0); }
   } else {                                                              // No Paddle
     if (playAlternate) {
-      if (prevSymbol == symDah) { playSym(symDit, TX); }
-      else playSym(symDah, TX);
+      if (prevSymbol == symDah) { playSym(symDit, TX, memoryId, 0); }
+      else playSym(symDah, TX, memoryId, 1);
       playAlternate = 0;
     }
     prevSymbol = 0;
@@ -578,7 +568,7 @@ void loop() {
 
   if (currState == stateIdle) {
       A0_switch = readAnalog();
-      keyer_loop(ditPressed, dahPressed, TX, NO_REC);
+      processPaddles(ditPressed, dahPressed, TX, NO_REC);
     
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
@@ -596,8 +586,8 @@ void loop() {
         A0_switch = readAnalog();
         // While in speed set mode we press Memory1, it changes to paddle keyer
         if (A0_switch == 1) {
-          playSym(symDit, SPKR);
-          playSym(symDit, SPKR);
+          playSym(symDit, SPKR, NO_REC, 0);
+          playSym(symDit, SPKR, NO_REC, 0);
           currKeyerMode = keyerModeIambic;
           saveStorageEmptyPacket(packetTypeKeyerModeIambic);
           waitPin(pinSetup, HIGH);
@@ -606,9 +596,9 @@ void loop() {
         }
         // While in speed set mode we press Memory2, it changes to straight key
         if (A0_switch == 2) {
-          playSym(symDit, SPKR);
-          playSym(symDit, SPKR);
-          playSym(symDit, SPKR);
+          playSym(symDit, SPKR, NO_REC, 0);
+          playSym(symDit, SPKR, NO_REC, 0);
+          playSym(symDit, SPKR, NO_REC, 0);
           currKeyerMode = keyerModeStraight;
           saveStorageEmptyPacket(packetTypeKeyerModeStraight);
           waitPin(pinSetup, HIGH);
@@ -617,10 +607,10 @@ void loop() {
         }
         // While in speed set mode we press Memory3, it changes to Vibroplex
         if (A0_switch == 3) {
-          playSym(symDit, SPKR);
-          playSym(symDit, SPKR);
-          playSym(symDit, SPKR);
-          playSym(symDah, SPKR);
+          playSym(symDit, SPKR, NO_REC, 0);
+          playSym(symDit, SPKR, NO_REC, 0);
+          playSym(symDit, SPKR, NO_REC, 0);
+          playSym(symDah, SPKR, NO_REC, 0);
           currKeyerMode = keyerModeVibroplex;
           saveStorageEmptyPacket(packetTypeKeyerModeVibroplex);
           waitPin(pinSetup, HIGH);
