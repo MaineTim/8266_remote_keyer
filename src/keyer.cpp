@@ -28,6 +28,8 @@
 
 #define SPKR 0
 #define TX 1
+#define NO_REC 0
+#define REC 1
 
 
 // PINS
@@ -108,6 +110,7 @@ int16_t pcount = 1000;
 // FORWARD DECLARATIONS
 
 void dumpSettingsToStorage();
+void keyer_loop(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t record);
 
 
 // LOW LEVEL FUNCTIONS
@@ -130,6 +133,19 @@ int16_t readAnalog() {
   else if (value > 600 && value < 900) return 2;
   else if (value > 900) return 3;
   return(0);
+}
+
+
+void playStraightKey(int16_t releasePin) {
+  tone(pinSpeaker, toneFreq);
+  digitalWrite(pinStatusLed, HIGH);
+  digitalWrite(pinMosfet, HIGH);
+
+  while (digitalRead(releasePin) == LOW) {}
+  
+  noTone(pinSpeaker);
+  digitalWrite(pinStatusLed, LOW);
+  digitalWrite(pinMosfet, LOW);  
 }
 
 
@@ -454,7 +470,7 @@ void factoryReset() {
 
 void loadStorage() {
   // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
-  int16_t resetRequested = (readAnalog() == 1 && digitalRead(pinSetup) == LOW);
+  int16_t resetRequested = (digitalRead(pinSetup) == LOW);
 
   if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) factoryReset();
 
@@ -494,6 +510,8 @@ void loadStorage() {
 
 
 void setup() {
+  Serial.begin(115200);
+
   pinMode(pinSetup, INPUT_PULLUP);
   pinMode(pinKeyDit, INPUT_PULLUP);
   pinMode(pinKeyDah, INPUT_PULLUP);
@@ -506,7 +524,7 @@ void setup() {
   EEPROM. begin(1024);
   loadStorage();
 
-  Serial.begin(115200);
+
 
   playSym(symDit, SPKR);
   playSym(symDah, SPKR);
@@ -514,19 +532,42 @@ void setup() {
 }
 
 
-// MAIN FUNCTIONS
+// SYMBOL AQUISITIOM FUNCTIONS
 
-void playStraightKey(int16_t releasePin) {
-  tone(pinSpeaker, toneFreq);
-  digitalWrite(pinStatusLed, HIGH);
-  digitalWrite(pinMosfet, HIGH);
+void keyer_loop(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t record) {
 
-  while (digitalRead(releasePin) == LOW) {}
-  
-  noTone(pinSpeaker);
-  digitalWrite(pinStatusLed, LOW);
-  digitalWrite(pinMosfet, LOW);  
+  if (ditDetected) {
+    playSym(symDit, TX);
+    ditDetected = 0;
+    playAlternate = 0;
+    ditPressed = 0;
+  }
+  if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
+    if (prevSymbol == symDah) { playSym(symDit, TX); }
+    else playSym(symDah, TX);
+    if (iambicModeB) playAlternate = 1;
+  } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
+    if (currKeyerMode == keyerModeIambic) {
+      playSym(symDah, TX);
+    } else if (currKeyerMode == keyerModeVibroplex) {
+      playStraightKey(pinKeyDah);
+    }
+  } else if (ditPressed) {                                              // Dit paddle
+    if (prevSymbol == symDit) ditDetected = 0;
+    if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
+    else { playSym(symDit, TX); }
+  } else {                                                              // No Paddle
+    if (playAlternate) {
+      if (prevSymbol == symDah) { playSym(symDit, TX); }
+      else playSym(symDah, TX);
+      playAlternate = 0;
+    }
+    prevSymbol = 0;
+  }
 }
+
+
+// MAIN FUNCTIONS
 
 
 void loop() {
@@ -536,35 +577,8 @@ void loop() {
   int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
 
   if (currState == stateIdle) {
-    A0_switch = readAnalog();
-    if (ditDetected) {
-      playSym(symDit, TX);
-      ditDetected = 0;
-      playAlternate = 0;
-      ditPressed = 0;
-    }
-    if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
-      if (prevSymbol == symDah) { playSym(symDit, TX); }
-      else playSym(symDah, TX);
-      if (iambicModeB) playAlternate = 1;
-    } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
-      if (currKeyerMode == keyerModeIambic) {
-        playSym(symDah, TX);
-      } else if (currKeyerMode == keyerModeVibroplex) {
-        playStraightKey(pinKeyDah);
-      }
-    } else if (ditPressed) {                                              // Dit paddle
-      if (prevSymbol == symDit) ditDetected = 0;
-      if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
-      else { playSym(symDit, TX); }
-    } else {                                                              // No Paddle
-      if (playAlternate) {
-        if (prevSymbol == symDah) { playSym(symDit, TX); }
-        else playSym(symDah, TX);
-        playAlternate = 0;
-      }
-      prevSymbol = 0;
-    }
+      A0_switch = readAnalog();
+      keyer_loop(ditPressed, dahPressed, TX, NO_REC);
     
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
