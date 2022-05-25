@@ -216,7 +216,7 @@ void dumpSettingsToStorage() {
 // SYMBOL GENERATION
 
 // Delay that checks for dot insertion and optionally can be interrupted
-// by a pin hitting a condition.
+// by a pin meeting a condition.
 int16_t delayInterruptable(int16_t ms, int16_t *pins, int16_t *conditions, size_t numPins) {
   unsigned long finish = millis() + ms;
 
@@ -422,6 +422,7 @@ void checkMemoryPin(int16_t memoryId, int16_t pin, int16_t inverted) {
 
 
 // PADDLE ADJUSTMENT INPUT FUNCTIONS
+// These are used to adjust program parameters via the paddles.
 
 int16_t scaleDown(int16_t orig, double factor, int16_t lowerLimit) {
   int16_t scaled = (int)((double)orig * factor);
@@ -524,6 +525,8 @@ void setup() {
 
 // SYMBOL AQUISITION FUNCTIONS
 
+// Takes the current state of the paddles and does the right thing with it. Handles element
+// comnpletion, passes along TX state, and memory location for recording.
 void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t memoryId) {
 
   if (ditDetected) {
@@ -558,7 +561,6 @@ void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, in
 
 
 // MAIN FUNCTIONS
-
 
 void loop() {
   int16_t A0_switch = 0;
