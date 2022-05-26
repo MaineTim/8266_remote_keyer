@@ -26,12 +26,50 @@
 
 #include <Arduino.h>
 #include <EEPROM.h>
+#include <ESP8266WiFi.h>
 
 
 #define SPKR 0
 #define TX 1
 #define NO_REC 0
 #define REC 1
+#define MORSE_NONE 0x01
+
+
+const unsigned char morse_ascii[] = {
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  0x73, MORSE_NONE, 0x55, 0x32,                   /* , _ . / */
+  0x3F, 0x2F, 0x27, 0x23,                         /* 0 1 2 3 */
+  0x21, 0x20, 0x30, 0x38,                         /* 4 5 6 7 */
+  0x3C, 0x3E, MORSE_NONE, MORSE_NONE,             /* 8 9 _ _ */
+  MORSE_NONE, 0x31, MORSE_NONE, 0x4C,             /* _ = _ ? */
+  MORSE_NONE, 0x05, 0x18, 0x1A,                   /* _ A B C */
+  0x0C, 0x02, 0x12, 0x0E,                         /* D E F G */
+  0x10, 0x04, 0x17, 0x0D,                         /* H I J K */
+  0x14, 0x07, 0x06, 0x0F,                         /* L M N O */
+  0x16, 0x1D, 0x0A, 0x08,                         /* P Q R S */
+  0x03, 0x09, 0x11, 0x0B,                         /* T U V W */
+  0x19, 0x1B, 0x1C, MORSE_NONE,                   /* X Y Z _ */
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+  MORSE_NONE, 0x05, 0x18, 0x1A,                   /* _ A B C */
+  0x0C, 0x02, 0x12, 0x0E,                         /* D E F G */
+  0x10, 0x04, 0x17, 0x0D,                         /* H I J K */
+  0x14, 0x07, 0x06, 0x0F,                         /* L M N O */
+  0x16, 0x1D, 0x0A, 0x08,                         /* P Q R S */
+  0x03, 0x09, 0x11, 0x0B,                         /* T U V W */
+  0x19, 0x1B, 0x1C, MORSE_NONE,                   /* X Y Z _ */
+  MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
+};
 
 
 // PINS
@@ -57,6 +95,10 @@ const int16_t stateSettingTone = 2;
 const int16_t keyerModeIambic = 0;
 const int16_t keyerModeVibroplex = 1;
 const int16_t keyerModeStraight = 2;
+
+const int16_t netDisconnected = 0;
+const int16_t netClient = 1;
+const int16_t netServer = 2;
 
 
 // SYMBOLS
@@ -95,18 +137,30 @@ int16_t iambicModeB = 1;                    // Default iambic mode
 char memory[3][600];
 size_t memorySize[3];
 
+const char* ssid = "***REMOVED***";
+const char* password =  "***REMOVED***";
+ 
+const int16_t port = 80;
+const char * host = "192.168.1.116";
+
 
 // RUN STATE
 
 int16_t currState = stateIdle;
 int16_t prevSymbol = 0; // 0=none, 1=dit, 2=dah
-unsigned long whenStartedPress;
+// unsigned long whenStartedPress;
 int16_t recording = 0;
 int16_t currStorageOffset = 0;
 int16_t playAlternate = 0;                  // Mode B completion flag
 int16_t ditDetected = 0;                    // Dit paddle hit during Dah play
 int16_t memSwitch = 0;                      // Memory switch set by readAnalog()
 int16_t pcount = 1000;
+int16_t netMode = netDisconnected;
+uint16_t toSend = 0;
+unsigned long spaceStarted = 0;
+
+WiFiServer wifiServer(80);
+WiFiClient client;
 
 
 // FORWARD DECLARATIONS
@@ -217,7 +271,7 @@ void dumpSettingsToStorage() {
 
 // Delay that checks for dot insertion and optionally can be interrupted
 // by a pin meeting a condition.
-int16_t delayInterruptable(int16_t ms, int16_t *pins, int16_t *conditions, size_t numPins) {
+int16_t delayInterruptable(int16_t ms, int16_t *pins, const int16_t *conditions, size_t numPins) {
   unsigned long finish = millis() + ms;
 
   while(1) {
@@ -276,6 +330,40 @@ int16_t playSymInterruptable(int16_t sym, int16_t transmit, int16_t pin, int16_t
 }
 
 
+// MORSE PLAYER FUNCTIONS
+
+void playChar(const char oneChar) {
+  int inchar = 0;
+
+  for (unsigned int j = 0; j < 8; j++) {
+      int bit = morse_ascii[(int)oneChar] & (0x80 >> j);
+      if (inchar) {
+          if (bit)
+            playSym(symDah, SPKR, NO_REC, 0);
+          else
+            playSym(symDit, SPKR, NO_REC, 0);
+          if (j < 7) {
+              delay(30);
+          }
+      } else if (bit) {
+          inchar = 1;
+      }
+  }
+  delay(100);
+}
+
+
+void playStr(const char *oneString) {
+
+  for (unsigned int j = 0; j < strlen(oneString); j++) {
+    if (oneString[j] == ' ')
+      delay(500);
+    else
+      playChar(oneString[j]);
+  }
+}
+
+
 // MEMORY RECORDING FUNCTIONS
 
 void memRecord(int16_t memoryId, int16_t value) {
@@ -295,27 +383,27 @@ void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
   digitalWrite(pinStatusLed, HIGH);
   recording = 1;
 
-  unsigned long spaceStarted = 0;
+  unsigned long loc_spaceStarted = 0;
   
   while(1) {
     int16_t ditPressed = (digitalRead(pinKeyDit) == LOW);
     int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
 
-    if ((ditPressed || dahPressed) && spaceStarted) {
+    if ((ditPressed || dahPressed) && loc_spaceStarted) {
       // record a space
-      double spaceDuration = millis() - spaceStarted;
+      double spaceDuration = millis() - loc_spaceStarted;
       spaceDuration /= ditMillis;
       spaceDuration += 2.5;
       int16_t toRecord = spaceDuration;
       if (toRecord > 255) toRecord = 255;
       memRecord(memoryId, toRecord);
-      spaceStarted = 0;
+      loc_spaceStarted = 0;
     }
 
     processPaddles(ditPressed, dahPressed, SPKR, memoryId);
 
     if (prevSymbol) {
-      spaceStarted = millis();
+      loc_spaceStarted = millis();
       prevSymbol = 0;
     }
 
@@ -501,6 +589,8 @@ void loadStorage() {
 
 
 void setup() {
+  int counter = 0;
+
   Serial.begin(115200);
 
   pinMode(pinSetup, INPUT_PULLUP);
@@ -515,11 +605,43 @@ void setup() {
   EEPROM. begin(1024);
   loadStorage();
 
+  playChar('Q');
+  
+#ifdef CLIENT
+  netMode = netClient;
+#elif SERVER
+  netMode = netServer;
+#else
+  netmode = readAnalog();
+#endif
 
-
-  playSym(symDit, SPKR, NO_REC, 0);
-  playSym(symDah, SPKR, NO_REC, 0);
-  playSym(symDit, SPKR, NO_REC, 0);
+  if (netMode == netClient || netMode == netServer) {
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(500);
+      Serial.println("...");
+    }
+    Serial.print("WiFi connected with IP: ");
+    Serial.println(WiFi.localIP());
+  }
+  switch (netMode) {
+    case 0:
+      playChar('R');
+      break;
+    case 1:
+      while (!client.connect(host, port)) {
+        Serial.println("Client connection failed");
+        if (++counter > 10) {
+          playStr("NO CONN");
+         break;
+        }
+      }
+      playChar('C');
+      break;
+    case 2:
+      wifiServer.begin();
+      playChar('S');
+  }
 }
 
 
@@ -563,15 +685,50 @@ void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, in
 // MAIN FUNCTIONS
 
 void loop() {
+
   int16_t A0_switch = 0;
 
   int16_t ditPressed = (digitalRead(pinKeyDit) == LOW);
   int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
 
-  if (currState == stateIdle) {
+  if (netMode == netServer) {
+    client = wifiServer.available();
+ 
+    if (client) {
+      while (client.connected()) {
+        while (client.available()>0) {
+          char c = client.read();
+          Serial.write(c);
+        }
+      }
+      client.stop();
+      Serial.println("Client disconnected");
+    }
+  } else if (currState == stateIdle) {
       A0_switch = readAnalog();
+
+      if ((ditPressed || dahPressed) && spaceStarted) {
+        double spaceDuration = millis() - spaceStarted;
+        spaceDuration /= ditMillis;
+        spaceDuration += 2.5;
+        toSend = spaceDuration;
+        if (toSend > 255) toSend = 255;
+        if (netMode == netClient) {
+          bitSet(toSend, 14);
+          bitSet(toSend, 15);
+          client.print(toSend);
+          toSend = 0;
+        }
+        spaceStarted = 0;
+      }
+
       processPaddles(ditPressed, dahPressed, TX, NO_REC);
-    
+
+      if (prevSymbol) {
+        spaceStarted = millis();
+        prevSymbol = 0;
+      }
+
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
       unsigned long whenStartedPress = millis();
