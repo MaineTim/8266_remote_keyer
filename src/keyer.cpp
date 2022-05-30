@@ -22,6 +22,7 @@
 // 2022-05-23 - Move memory switches to A0.
 // 2022-05-24 - Fixed dot completion.
 // 2022-05-25 - Create processPaddles(), use it for both main loop and memory recording.
+// 2022-05-26 - Add CW player, network init code (TODO: get network code working.)
 
 
 #include <Arduino.h>
@@ -36,6 +37,8 @@
 #define MORSE_NONE 0x01
 
 
+// Morse encoding derived from KB8OJH
+// https://kb8ojh.net/msp430/
 const unsigned char morse_ascii[] = {
   MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
   MORSE_NONE, MORSE_NONE, MORSE_NONE, MORSE_NONE,
@@ -141,7 +144,7 @@ const char* ssid = "***REMOVED***";
 const char* password =  "***REMOVED***";
  
 const int16_t port = 80;
-const char * host = "192.168.1.116";
+const char * host = "192.168.1.132";
 
 
 // RUN STATE
@@ -630,14 +633,13 @@ void setup() {
       break;
     case 1:
       while (!client.connect(host, port)) {
-        Serial.println("Client connection failed");
         if (++counter > 10) {
           playStr("NO CONN");
-         break;
+          goto end_case;
         }
       }
       playChar('C');
-      break;
+      end_case: break;
     case 2:
       wifiServer.begin();
       playChar('S');
@@ -677,6 +679,7 @@ void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, in
       else playSym(symDah, TX, memoryId, 1);
       playAlternate = 0;
     }
+    spaceStarted = millis();  
     prevSymbol = 0;
   }
 }
@@ -693,10 +696,9 @@ void loop() {
 
   if (netMode == netServer) {
     client = wifiServer.available();
- 
     if (client) {
       while (client.connected()) {
-        while (client.available()>0) {
+        while (client.available() > 0) {
           char c = client.read();
           Serial.write(c);
         }
@@ -712,22 +714,22 @@ void loop() {
         spaceDuration /= ditMillis;
         spaceDuration += 2.5;
         toSend = spaceDuration;
-        if (toSend > 255) toSend = 255;
+        if (toSend > 16383) toSend = 16383;
         if (netMode == netClient) {
           bitSet(toSend, 14);
           bitSet(toSend, 15);
-          client.print(toSend);
+          Serial.print(spaceDuration);
+          Serial.print(" ");
+          Serial.print(toSend);
+          Serial.print(" ");
+          playChar('E');
+          client.print("E");
           toSend = 0;
         }
         spaceStarted = 0;
       }
 
       processPaddles(ditPressed, dahPressed, TX, NO_REC);
-
-      if (prevSymbol) {
-        spaceStarted = millis();
-        prevSymbol = 0;
-      }
 
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
