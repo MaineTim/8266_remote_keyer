@@ -166,11 +166,13 @@ int ditDetected = 0;                    // Dit paddle hit during Dah play
 int memSwitch = 0;                      // Memory switch set by readAnalog()
 int pcount = 1000;
 int netMode = netDisconnected;
-unsigned int toSend = 0;
 unsigned long spaceStarted = 0;
 unsigned long milliDuration = 0;
 unsigned int packetCount = 0;
 double spaceDuration = 0;
+unsigned int toSend = 0;
+uint16_t toChar = 0;
+uint16_t toLength = 0;
 
 DataPacket packet;
 
@@ -365,6 +367,10 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 void playSym(int sym, int transmit, int memoryId, int toRecord) {
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
   if (memoryId) memRecord(memoryId, toRecord);
+  if ((netMode == netClient) && transmit) {
+    toChar = (toChar << 2) + sym;
+    toLength++;  
+  }
 }
 
 
@@ -685,6 +691,8 @@ playChar('R');
 // comnpletion, passes along TX state, and memory location for recording.
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
+  char frame[64];
+
   if (ditDetected) {
     playSym(symDit, TX, memoryId, 0);
     ditDetected = 0;
@@ -712,7 +720,27 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
       playAlternate = 0;
     }
     if (spaceStarted == 0) 
-      spaceStarted = millis();  
+      spaceStarted = millis();
+    if (toChar && (netMode == netClient)) {
+      toSend = (toLength << 16) + toChar;
+      packetCount++;
+      Serial.println(toSend);
+      Serial.println(packetCount);
+      packet.number = packetCount;
+      packet.data = toSend;
+      memcpy(frame, &packet, sizeof(packet));
+      udp.beginPacket(host, port);
+      yield();
+      udp.write(frame, sizeof(packet));
+      yield();
+      int result = udp.endPacket();
+      if (result)
+        Serial.println("Packet away...");
+      else
+        Serial.println("Error sending packet");                    
+      toSend = 0;
+      toChar = 0;
+    }
     prevSymbol = 0;
   }
 }
@@ -766,11 +794,12 @@ void loop() {
           bitSet(toSend, 30);
         }
         if (toSend) {
+          packetCount++;
           Serial.println(milliDuration);
           printDouble(spaceDuration, 0);
           Serial.println();
           Serial.println(toSend);
-          Serial.println(++packetCount);
+          Serial.println(packetCount);
           packet.number = packetCount;
           packet.data = toSend;
           memcpy(frame, &packet, sizeof(packet));
