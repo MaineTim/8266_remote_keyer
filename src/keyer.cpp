@@ -28,6 +28,7 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
+#include <WiFiUdp.h>
 
 
 #define SPKR 0
@@ -77,65 +78,65 @@ const unsigned char morse_ascii[] = {
 
 // PINS
 
-const int16_t pinDebug = D1;
-const int16_t pinSetup = D7;               // Press Setup (Adjust speed and tone)
-const int16_t pinKeyDit = D5;              // Key, dit paddle
-const int16_t pinKeyDah = D6;              // Key, dah paddle
-const int16_t pinStatusLed = D4;           // Led ESP8266 builin
-const int16_t pinMosfet = D0;              // Key rig jack
-const int16_t pinSpeaker = D8;             // Speaker
+const int pinDebug = D1;
+const int pinSetup = D7;               // Press Setup (Adjust speed and tone)
+const int pinKeyDit = D5;              // Key, dit paddle
+const int pinKeyDah = D6;              // Key, dah paddle
+const int pinStatusLed = D4;           // Led ESP8266 builin
+const int pinMosfet = D0;              // Key rig jack
+const int pinSpeaker = D8;             // Speaker
 
 
 // STATE
 
-const int16_t stateIdle = 0;
-const int16_t stateSettingSpeed = 1;
-const int16_t stateSettingTone = 2;
+const int stateIdle = 0;
+const int stateSettingSpeed = 1;
+const int stateSettingTone = 2;
 
 
 // MODE TYPES
 
-const int16_t keyerModeIambic = 0;
-const int16_t keyerModeVibroplex = 1;
-const int16_t keyerModeStraight = 2;
+const int keyerModeIambic = 0;
+const int keyerModeVibroplex = 1;
+const int keyerModeStraight = 2;
 
-const int16_t netDisconnected = 0;
-const int16_t netClient = 1;
-const int16_t netServer = 2;
+const int netDisconnected = 0;
+const int netClient = 1;
+const int netServer = 2;
 
 
 // SYMBOLS
 
-const int16_t symDit = 1;
-const int16_t symDah = 2;
+const int symDit = 1;
+const int symDah = 2;
 
 
 // SAVE PACKET TYPES
 
-const int16_t packetTypeEnd = 0;
-const int16_t packetTypeSpeed = 1;
-const int16_t packetTypeFreq = 2;
-const int16_t packetTypeKeyerModeIambic = 3;
-const int16_t packetTypeKeyerModeVibroplex = 4;
-const int16_t packetTypeKeyerModeStraight = 5;
-const int16_t packetTypeMem0 = 20;
-const int16_t packetTypeMem1 = 21;
-const int16_t packetTypeMem2 = 22;
+const int packetTypeEnd = 0;
+const int packetTypeSpeed = 1;
+const int packetTypeFreq = 2;
+const int packetTypeKeyerModeIambic = 3;
+const int packetTypeKeyerModeVibroplex = 4;
+const int packetTypeKeyerModeStraight = 5;
+const int packetTypeMem0 = 20;
+const int packetTypeMem1 = 21;
+const int packetTypeMem2 = 22;
 
 
 // INTERNAL MEMORIES
 
-const int16_t storageSize = 2048;
-const int16_t storageMagic1 = 182;
-const int16_t storageMagic2 = 97;
+const int storageSize = 2048;
+const int storageMagic1 = 182;
+const int storageMagic2 = 97;
 
 
 // CONFIG DEFAULTS
 
-int16_t toneFreq = 700;                     // Default sidetone frequncy
-int16_t ditMillis = 60;                     // Default speed
-int16_t currKeyerMode = keyerModeIambic;    // Default mode
-int16_t iambicModeB = 1;                    // Default iambic mode
+int toneFreq = 700;                     // Default sidetone frequncy
+int ditMillis = 60;                     // Default speed
+int currKeyerMode = keyerModeIambic;    // Default mode
+int iambicModeB = 1;                    // Default iambic mode
 
 char memory[3][600];
 size_t memorySize[3];
@@ -143,40 +144,81 @@ size_t memorySize[3];
 const char* ssid = "***REMOVED***";
 const char* password =  "***REMOVED***";
  
-const int16_t port = 80;
+const unsigned int port = 4120;
 const char * host = "192.168.1.132";
+
+WiFiUDP udp;
+struct DataPacket {
+  unsigned int number;
+  unsigned int data;
+};
 
 
 // RUN STATE
 
-int16_t currState = stateIdle;
-int16_t prevSymbol = 0; // 0=none, 1=dit, 2=dah
+int currState = stateIdle;
+int prevSymbol = 0; // 0=none, 1=dit, 2=dah
 // unsigned long whenStartedPress;
-int16_t recording = 0;
-int16_t currStorageOffset = 0;
-int16_t playAlternate = 0;                  // Mode B completion flag
-int16_t ditDetected = 0;                    // Dit paddle hit during Dah play
-int16_t memSwitch = 0;                      // Memory switch set by readAnalog()
-int16_t pcount = 1000;
-int16_t netMode = netDisconnected;
-uint16_t toSend = 0;
+int recording = 0;
+int currStorageOffset = 0;
+int playAlternate = 0;                  // Mode B completion flag
+int ditDetected = 0;                    // Dit paddle hit during Dah play
+int memSwitch = 0;                      // Memory switch set by readAnalog()
+int pcount = 1000;
+int netMode = netDisconnected;
+unsigned int toSend = 0;
 unsigned long spaceStarted = 0;
+unsigned long milliDuration = 0;
+unsigned int packetCount = 0;
+double spaceDuration = 0;
 
-WiFiServer wifiServer(80);
-WiFiClient client;
+DataPacket packet;
 
 
 // FORWARD DECLARATIONS
 
 void dumpSettingsToStorage();
-void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t memoryId);
-void memRecord(int16_t memoryId, int16_t value);
+void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId);
+void memRecord(int memoryId, int value);
 
 
 // LOW LEVEL FUNCTIONS
 
+ void printDouble( double val, byte precision){
+  // prints val with number of decimal places determine by precision
+  // precision is a number from 0 to 6 indicating the desired decimial places
+  // example: lcdPrintDouble( 3.1415, 2); // prints 3.14 (two decimal places)
+ 
+  if(val < 0.0){
+    Serial.print('-');
+    val = -val;
+  }
+
+  Serial.print (int(val));  //prints the int part
+  if( precision > 0) {
+    Serial.print("."); // print the decimal point
+    unsigned long frac;
+    unsigned long mult = 1;
+    byte padding = precision -1;
+    while(precision--)
+  mult *=10;
+ 
+    if(val >= 0)
+ frac = (val - int(val)) * mult;
+    else
+ frac = (int(val)- val ) * mult;
+    unsigned long frac1 = frac;
+    while( frac1 /= 10 )
+ padding--;
+    while(  padding--)
+ Serial.print("0");
+    Serial.print(frac,DEC) ;
+  }
+}
+
+
 // Toggle pin for debug signalling.
-void pulsePin(int16_t pin, int16_t count) {
+void pulsePin(int pin, int count) {
   while (count-- > 0) {
     digitalWrite(pin, HIGH);
     digitalWrite(pin, LOW);
@@ -186,8 +228,8 @@ void pulsePin(int16_t pin, int16_t count) {
 
 // Read the analog pin and assign a value to
 // global memSwitch.
-int16_t readAnalog() {
-  int16_t value = analogRead(PIN_A0);
+int readAnalog() {
+  int value = analogRead(PIN_A0);
   if (value < 100) return 0;
   else if (value > 400 && value < 600) return 1;
   else if (value > 600 && value < 900) return 2;
@@ -196,7 +238,7 @@ int16_t readAnalog() {
 }
 
 
-void playStraightKey(int16_t releasePin) {
+void playStraightKey(int releasePin) {
   tone(pinSpeaker, toneFreq);
   digitalWrite(pinStatusLed, HIGH);
   digitalWrite(pinMosfet, HIGH);
@@ -211,7 +253,7 @@ void playStraightKey(int16_t releasePin) {
 
 // EEPROM FUNCTIONS
 
-void saveStorageEmptyPacket(int16_t type) {
+void saveStorageEmptyPacket(int type) {
   if (currStorageOffset + 1 >= storageSize) {
     dumpSettingsToStorage();
     return;
@@ -223,7 +265,7 @@ void saveStorageEmptyPacket(int16_t type) {
 }
 
 
-void saveStorageInt(int16_t type, int16_t value) {
+void saveStorageInt(int type, int value) {
   if (currStorageOffset + 1 + 2 >= storageSize) {
     dumpSettingsToStorage();
     return;
@@ -236,13 +278,13 @@ void saveStorageInt(int16_t type, int16_t value) {
 }
 
 
-void saveStorageMemory(int16_t memoryId) {
+void saveStorageMemory(int memoryId) {
   if (currStorageOffset + 1 + 2 + memorySize[memoryId] >= storageSize) {
     dumpSettingsToStorage();
     return;
   }
 
-  int16_t type = 0;
+  int type = 0;
   if (memoryId == 0) type = packetTypeMem0;
   else if (memoryId == 1) type = packetTypeMem1;
   else if (memoryId == 2) type = packetTypeMem2;
@@ -274,7 +316,7 @@ void dumpSettingsToStorage() {
 
 // Delay that checks for dot insertion and optionally can be interrupted
 // by a pin meeting a condition.
-int16_t delayInterruptable(int16_t ms, int16_t *pins, const int16_t *conditions, size_t numPins) {
+int delayInterruptable(int ms, int *pins, const int *conditions, size_t numPins) {
   unsigned long finish = millis() + ms;
 
   while(1) {
@@ -290,22 +332,22 @@ int16_t delayInterruptable(int16_t ms, int16_t *pins, const int16_t *conditions,
 }
 
 
-void waitPin(int16_t pin, int16_t condition) {
-  int16_t pins[1] = { pin };
-  int16_t conditions[1] = { condition };
+void waitPin(int pin, int condition) {
+  int pins[1] = { pin };
+  int conditions[1] = { condition };
   delayInterruptable(-1, pins, conditions, 1);
   delay(250); // debounce
 }
 
 
-int16_t playSymInterruptableVec(int16_t sym, int16_t transmit, int16_t *pins, int16_t *conditions, size_t numPins) {
+int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, size_t numPins) {
   prevSymbol = sym;
 
   tone(pinSpeaker, toneFreq);
   digitalWrite(pinStatusLed, recording ? LOW : HIGH);
   if (transmit) digitalWrite(pinMosfet, HIGH);
   
-  int16_t ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
+  int ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
 
   noTone(pinSpeaker);
   digitalWrite(pinStatusLed, recording ? HIGH : LOW);
@@ -320,15 +362,15 @@ int16_t playSymInterruptableVec(int16_t sym, int16_t transmit, int16_t *pins, in
 }
 
 
-void playSym(int16_t sym, int16_t transmit, int16_t memoryId, int16_t toRecord) {
+void playSym(int sym, int transmit, int memoryId, int toRecord) {
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
   if (memoryId) memRecord(memoryId, toRecord);
 }
 
 
-int16_t playSymInterruptable(int16_t sym, int16_t transmit, int16_t pin, int16_t condition) {
-  int16_t pins[1] = { pin };
-  int16_t conditions[1] = { condition };
+int playSymInterruptable(int sym, int transmit, int pin, int condition) {
+  int pins[1] = { pin };
+  int conditions[1] = { condition };
   return playSymInterruptableVec(sym, transmit, pins, conditions, 1);
 }
 
@@ -369,13 +411,13 @@ void playStr(const char *oneString) {
 
 // MEMORY RECORDING FUNCTIONS
 
-void memRecord(int16_t memoryId, int16_t value) {
+void memRecord(int memoryId, int value) {
   memory[memoryId][memorySize[memoryId]] = value;
   memorySize[memoryId]++;
 }
 
 
-void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
+void setMemory(int memoryId, int pin, int inverted) {
   memorySize[memoryId] = 0;
   playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
@@ -389,15 +431,15 @@ void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
   unsigned long loc_spaceStarted = 0;
   
   while(1) {
-    int16_t ditPressed = (digitalRead(pinKeyDit) == LOW);
-    int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
+    int ditPressed = (digitalRead(pinKeyDit) == LOW);
+    int dahPressed = (digitalRead(pinKeyDah) == LOW);
 
     if ((ditPressed || dahPressed) && loc_spaceStarted) {
       // record a space
       double spaceDuration = millis() - loc_spaceStarted;
       spaceDuration /= ditMillis;
       spaceDuration += 2.5;
-      int16_t toRecord = spaceDuration;
+      int toRecord = spaceDuration;
       if (toRecord > 255) toRecord = 255;
       memRecord(memoryId, toRecord);
       loc_spaceStarted = 0;
@@ -430,7 +472,7 @@ void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
   delay(300);
   tone(pinSpeaker, 2000);
 
-  for (int16_t i=0; i<=memoryId; i++) {
+  for (int i=0; i<=memoryId; i++) {
     digitalWrite(pinStatusLed, HIGH);
     delay(150);
     digitalWrite(pinStatusLed, LOW);
@@ -441,7 +483,7 @@ void setMemory(int16_t memoryId, int16_t pin, int16_t inverted) {
 }
 
 
-void playMemory(int16_t memoryId) {
+void playMemory(int memoryId) {
   if (memorySize[memoryId] == 0) {
     tone(pinSpeaker, 800);
     delay(200);
@@ -451,28 +493,28 @@ void playMemory(int16_t memoryId) {
     return;
   }
 
-  int16_t pins[2] = { pinKeyDit, pinKeyDah };
-  int16_t conditions[2] = { LOW, LOW };
+  int pins[2] = { pinKeyDit, pinKeyDah };
+  int conditions[2] = { LOW, LOW };
 
   for (size_t i=0; i < memorySize[memoryId]; i++) {
-    int16_t cmd = memory[memoryId][i];
+    int cmd = memory[memoryId][i];
 
     if (cmd == 0) {
-      int16_t ret = playSymInterruptableVec(symDit, 1, pins, conditions, 2);
+      int ret = playSymInterruptableVec(symDit, 1, pins, conditions, 2);
       if (ret != -1) {
         delay(10);
         waitPin(ret, HIGH);
         return;
       }
     } else if (cmd == 1) {
-      int16_t ret = playSymInterruptableVec(symDah, 1, pins, conditions, 2);
+      int ret = playSymInterruptableVec(symDah, 1, pins, conditions, 2);
       if (ret != -1) {
         delay(10);
         waitPin(ret, HIGH);
         return;
       }
     } else {
-      int16_t duration = cmd - 2;
+      int duration = cmd - 2;
       duration *= ditMillis;
       delay(duration);
     }
@@ -480,11 +522,11 @@ void playMemory(int16_t memoryId) {
 }
 
 
-void checkMemoryPin(int16_t memoryId, int16_t pin, int16_t inverted) {
+void checkMemoryPin(int memoryId, int pin, int inverted) {
   if (readAnalog() == pin) {
     unsigned long whenStartedPress = millis();
 
-    int16_t doingSet = 0;
+    int doingSet = 0;
       
     delay(5);
         
@@ -515,16 +557,16 @@ void checkMemoryPin(int16_t memoryId, int16_t pin, int16_t inverted) {
 // PADDLE ADJUSTMENT INPUT FUNCTIONS
 // These are used to adjust program parameters via the paddles.
 
-int16_t scaleDown(int16_t orig, double factor, int16_t lowerLimit) {
-  int16_t scaled = (int)((double)orig * factor);
+int scaleDown(int orig, double factor, int lowerLimit) {
+  int scaled = (int)((double)orig * factor);
   if (scaled == orig) scaled--;
   if (scaled < lowerLimit) scaled = lowerLimit;
   return scaled;
 }
 
 
-int16_t scaleUp(int16_t orig, double factor, int16_t upperLimit) {
-  int16_t scaled = (int)((double)orig * factor);
+int scaleUp(int orig, double factor, int upperLimit) {
+  int scaled = (int)((double)orig * factor);
   if (scaled == orig) scaled++;
   if (scaled > upperLimit) scaled = upperLimit;
   return scaled;
@@ -552,14 +594,14 @@ void factoryReset() {
 
 void loadStorage() {
   // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
-  int16_t resetRequested = (digitalRead(pinSetup) == LOW);
+  int resetRequested = (digitalRead(pinSetup) == LOW);
 
   if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) factoryReset();
 
   currStorageOffset = 2;
   
   while (1) {
-    int16_t packetType = EEPROM.read(currStorageOffset);
+    int packetType = EEPROM.read(currStorageOffset);
     if (packetType == packetTypeEnd) {
       break;
     } else if (packetType == packetTypeSpeed) {
@@ -575,7 +617,7 @@ void loadStorage() {
     } else if (packetType == packetTypeKeyerModeStraight) {
       currKeyerMode = keyerModeStraight;
     } else if (packetType >= packetTypeMem0 && packetType <= packetTypeMem2) {
-      int16_t memoryId = 0;
+      int memoryId = 0;
       if (packetType == packetTypeMem0) memoryId = 0;
       if (packetType == packetTypeMem1) memoryId = 1;
       if (packetType == packetTypeMem2) memoryId = 2;
@@ -592,8 +634,6 @@ void loadStorage() {
 
 
 void setup() {
-  int counter = 0;
-
   Serial.begin(115200);
 
   pinMode(pinSetup, INPUT_PULLUP);
@@ -627,23 +667,15 @@ void setup() {
     Serial.print("WiFi connected with IP: ");
     Serial.println(WiFi.localIP());
   }
-  switch (netMode) {
-    case 0:
-      playChar('R');
-      break;
-    case 1:
-      while (!client.connect(host, port)) {
-        if (++counter > 10) {
-          playStr("NO CONN");
-          goto end_case;
-        }
-      }
-      playChar('C');
-      end_case: break;
-    case 2:
-      wifiServer.begin();
-      playChar('S');
-  }
+  if (netMode) {
+    if (udp.begin(port) == 0)
+      playStr("NO PORT");
+    else if (netMode == netClient) 
+        playChar('C');
+      else
+        playChar('S');
+  } else     
+playChar('R');
 }
 
 
@@ -651,7 +683,7 @@ void setup() {
 
 // Takes the current state of the paddles and does the right thing with it. Handles element
 // comnpletion, passes along TX state, and memory location for recording.
-void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, int16_t memoryId) {
+void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
   if (ditDetected) {
     playSym(symDit, TX, memoryId, 0);
@@ -679,7 +711,8 @@ void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, in
       else playSym(symDah, TX, memoryId, 1);
       playAlternate = 0;
     }
-    spaceStarted = millis();  
+    if (spaceStarted == 0) 
+      spaceStarted = millis();  
     prevSymbol = 0;
   }
 }
@@ -688,45 +721,73 @@ void processPaddles(int16_t ditPressed, int16_t dahPressed, int16_t transmit, in
 // MAIN FUNCTIONS
 
 void loop() {
+  char frame[64];
+  char buffer[6];
+  int len = 0;
 
-  int16_t A0_switch = 0;
+  int A0_switch = 0;
 
-  int16_t ditPressed = (digitalRead(pinKeyDit) == LOW);
-  int16_t dahPressed = (digitalRead(pinKeyDah) == LOW);
+  int ditPressed = (digitalRead(pinKeyDit) == LOW);
+  int dahPressed = (digitalRead(pinKeyDah) == LOW);
 
   if (netMode == netServer) {
-    client = wifiServer.available();
-    if (client) {
-      while (client.connected()) {
-        while (client.available() > 0) {
-          char c = client.read();
-          Serial.write(c);
-        }
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+      Serial.print("Received packet! Size: ");
+      Serial.println(packetSize); 
+      len = udp.read(frame, 64);
+      if (len > 0) frame[len] = '\0';
+      Serial.print("Packet received: ");
+      for (uint8_t x = 0; x < len; x++) {
+        sprintf(buffer, "%x ", frame[x]);
+        Serial.print(buffer);
+        Serial.println();
       }
-      client.stop();
-      Serial.println("Client disconnected");
+      memcpy(&packet, frame, sizeof(packet));
+      Serial.println(packet.number);
+      Serial.println(packet.data);
     }
   } else if (currState == stateIdle) {
       A0_switch = readAnalog();
 
-      if ((ditPressed || dahPressed) && spaceStarted) {
-        double spaceDuration = millis() - spaceStarted;
-        spaceDuration /= ditMillis;
-        spaceDuration += 2.5;
-        toSend = spaceDuration;
-        if (toSend > 16383) toSend = 16383;
-        if (netMode == netClient) {
-          bitSet(toSend, 14);
-          bitSet(toSend, 15);
-          Serial.print(spaceDuration);
-          Serial.print(" ");
-          Serial.print(toSend);
-          Serial.print(" ");
-          playChar('E');
-          client.print("E");
+      if (spaceStarted && netMode == netClient) {
+        milliDuration = millis() - spaceStarted;
+        if (milliDuration > 2000) {
           toSend = 0;
+          bitSet(toSend, 31);
+          yield();
+        } else if (ditPressed || dahPressed) {
+          spaceDuration = milliDuration;
+          spaceDuration /= ditMillis;
+          spaceDuration += 2.5;
+          toSend = spaceDuration;
+          if (toSend > 16383) toSend = 16383;
+          bitSet(toSend, 31);
+          bitSet(toSend, 30);
         }
-        spaceStarted = 0;
+        if (toSend) {
+          Serial.println(milliDuration);
+          printDouble(spaceDuration, 0);
+          Serial.println();
+          Serial.println(toSend);
+          Serial.println(++packetCount);
+          packet.number = packetCount;
+          packet.data = toSend;
+          memcpy(frame, &packet, sizeof(packet));
+          udp.beginPacket(host, port);
+          yield();
+          udp.write(frame, sizeof(packet));
+          yield();
+          int result = udp.endPacket();
+          if (milliDuration > 2000)
+            delay(100);
+          if (result)
+            Serial.println("Packet away...");
+          else
+            Serial.println("Error sending packet");                    
+          toSend = 0;
+          spaceStarted = 0;
+        }
       }
 
       processPaddles(ditPressed, dahPressed, TX, NO_REC);
@@ -734,7 +795,7 @@ void loop() {
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
       unsigned long whenStartedPress = millis();
-      int16_t nextState = stateSettingSpeed;
+      int nextState = stateSettingSpeed;
       
       delay(5);
         
