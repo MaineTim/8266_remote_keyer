@@ -31,6 +31,10 @@
 #include <WiFiUdp.h>
 
 
+
+#include <Debug.h>
+
+
 #define SPKR 0
 #define TX 1
 #define NO_REC 0
@@ -124,6 +128,13 @@ const int packetTypeMem1 = 21;
 const int packetTypeMem2 = 22;
 
 
+// UDP PACKET TYPES
+
+const int udpFrame = 0;
+const int udpKeepAlive = 2;
+const int udpSpace = 3;
+
+
 // INTERNAL MEMORIES
 
 const int storageSize = 2048;
@@ -146,6 +157,7 @@ const char* password =  "***REMOVED***";
  
 const unsigned int port = 4120;
 const char * host = "192.168.1.132";
+// const char * host = "192.168.1.124";
 
 WiFiUDP udp;
 struct DataPacket {
@@ -173,6 +185,7 @@ double spaceDuration = 0;
 unsigned int toSend = 0;
 uint16_t toChar = 0;
 uint16_t toLength = 0;
+int sinceLast = 0;
 
 DataPacket packet;
 
@@ -185,39 +198,6 @@ void memRecord(int memoryId, int value);
 
 
 // LOW LEVEL FUNCTIONS
-
- void printDouble( double val, byte precision){
-  // prints val with number of decimal places determine by precision
-  // precision is a number from 0 to 6 indicating the desired decimial places
-  // example: lcdPrintDouble( 3.1415, 2); // prints 3.14 (two decimal places)
- 
-  if(val < 0.0){
-    Serial.print('-');
-    val = -val;
-  }
-
-  Serial.print (int(val));  //prints the int part
-  if( precision > 0) {
-    Serial.print("."); // print the decimal point
-    unsigned long frac;
-    unsigned long mult = 1;
-    byte padding = precision -1;
-    while(precision--)
-  mult *=10;
- 
-    if(val >= 0)
- frac = (val - int(val)) * mult;
-    else
- frac = (int(val)- val ) * mult;
-    unsigned long frac1 = frac;
-    while( frac1 /= 10 )
- padding--;
-    while(  padding--)
- Serial.print("0");
-    Serial.print(frac,DEC) ;
-  }
-}
-
 
 // Toggle pin for debug signalling.
 void pulsePin(int pin, int count) {
@@ -369,8 +349,11 @@ void playSym(int sym, int transmit, int memoryId, int toRecord) {
   if (memoryId) memRecord(memoryId, toRecord);
   if ((netMode == netClient) && transmit) {
     toChar = (toChar << 2) + sym;
-    toLength++;  
+    toLength++;
+
+    DEBUG_PRINTLN(toChar);
   }
+  sinceLast = millis();
 }
 
 
@@ -668,10 +651,10 @@ void setup() {
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
-      Serial.println("...");
+      DEBUG_PRINTLN("...");
     }
-    Serial.print("WiFi connected with IP: ");
-    Serial.println(WiFi.localIP());
+    DEBUG_PRINT("WiFi connected with IP: ");
+    DEBUG_PRINTLN(WiFi.localIP());
   }
   if (netMode) {
     if (udp.begin(port) == 0)
@@ -692,6 +675,7 @@ playChar('R');
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
   char frame[64];
+  char buffer[8];
 
   if (ditDetected) {
     playSym(symDit, TX, memoryId, 0);
@@ -721,27 +705,65 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
     }
     if (spaceStarted == 0) 
       spaceStarted = millis();
-    if (toChar && (netMode == netClient)) {
+    if (toChar && (netMode == netClient) && (millis() - sinceLast > ditMillis)) {
       toSend = (toLength << 16) + toChar;
       packetCount++;
-      Serial.println(toSend);
-      Serial.println(packetCount);
       packet.number = packetCount;
       packet.data = toSend;
+      DEBUG_PRINTLN(packetCount);
+      sprintf(buffer, "%0x", packet.data);
+      DEBUG_PRINTLN(buffer);         
       memcpy(frame, &packet, sizeof(packet));
       udp.beginPacket(host, port);
       yield();
       udp.write(frame, sizeof(packet));
       yield();
       int result = udp.endPacket();
+      delay(50);
       if (result)
-        Serial.println("Packet away...");
-      else
-        Serial.println("Error sending packet");                    
+        DEBUG_PRINTLN("Frame packet away...");
+      else {
+        DEBUG_PRINTLN("Error sending packet"); }                   
       toSend = 0;
       toChar = 0;
+      toLength = 0;
+      spaceStarted = 0;
     }
     prevSymbol = 0;
+  }
+}
+
+
+void decodePacket(DataPacket packet) {
+
+  char buffer[8];
+
+  uint16_t frameLength = (uint16_t) (packet.data >> 16);
+  uint16_t frame = (uint16_t) packet.data;
+  uint16_t udpPacketType = frameLength >> 14;
+
+  switch (udpPacketType) {
+      case udpKeepAlive:
+        // DEBUG_PRINTLN("KeepAlive");
+        break;
+      case udpSpace:
+        DEBUG_PRINTLN("Space");
+        break;
+      case udpFrame:
+        DEBUG_PRINTLN("Frame");       
+  }
+  if (udpPacketType != udpKeepAlive) {
+    // sprintf(buffer, "%0x", packet.data);
+    // Serial.println(buffer);
+    // Serial.println(packet.number);
+    // sprintf(buffer, "%0x", frameLength);    
+    // Serial.println(buffer);
+    // sprintf(buffer, "%0x", frame);    
+    // Serial.println(buffer);
+    DEBUG_PRINTHEXLN(packet.data);
+    DEBUG_PRINTLN(packet.number);
+    DEBUG_PRINTHEXLN(frameLength);
+    DEBUG_PRINTHEXLN(frame);
   }
 }
 
@@ -750,7 +772,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 
 void loop() {
   char frame[64];
-  char buffer[6];
+  char buffer[8];
   int len = 0;
 
   int A0_switch = 0;
@@ -761,47 +783,33 @@ void loop() {
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
-      Serial.print("Received packet! Size: ");
-      Serial.println(packetSize); 
       len = udp.read(frame, 64);
-      if (len > 0) frame[len] = '\0';
-      Serial.print("Packet received: ");
-      for (uint8_t x = 0; x < len; x++) {
-        sprintf(buffer, "%x ", frame[x]);
-        Serial.print(buffer);
-        Serial.println();
-      }
+      // if (len > 0) frame[len] = '\0';
       memcpy(&packet, frame, sizeof(packet));
-      Serial.println(packet.number);
-      Serial.println(packet.data);
+      decodePacket(packet);
     }
   } else if (currState == stateIdle) {
       A0_switch = readAnalog();
 
       if (spaceStarted && netMode == netClient) {
+        toSend  = 0;
+        uint16_t udpPacketType = 0;
         milliDuration = millis() - spaceStarted;
         if (milliDuration > 2000) {
-          toSend = 0;
-          bitSet(toSend, 31);
+          udpPacketType = udpKeepAlive;
+          spaceDuration = 0;
           yield();
-        } else if (ditPressed || dahPressed) {
+        } else if ((ditPressed || dahPressed) && (milliDuration > ditMillis * 3)) {
           spaceDuration = milliDuration;
           spaceDuration /= ditMillis;
           spaceDuration += 2.5;
-          toSend = spaceDuration;
-          if (toSend > 16383) toSend = 16383;
-          bitSet(toSend, 31);
-          bitSet(toSend, 30);
+          udpPacketType = udpSpace;
         }
-        if (toSend) {
-          packetCount++;
-          Serial.println(milliDuration);
-          printDouble(spaceDuration, 0);
-          Serial.println();
-          Serial.println(toSend);
-          Serial.println(packetCount);
-          packet.number = packetCount;
-          packet.data = toSend;
+        if (udpPacketType) {
+          packet.number = ++packetCount;
+          packet.data = (udpPacketType << 30) + (int)spaceDuration;
+          DEBUG_PRINTLN(packetCount);
+          DEBUG_PRINTHEXLN(packet.data);
           memcpy(frame, &packet, sizeof(packet));
           udp.beginPacket(host, port);
           yield();
@@ -810,10 +818,12 @@ void loop() {
           int result = udp.endPacket();
           if (milliDuration > 2000)
             delay(100);
-          if (result)
-            Serial.println("Packet away...");
-          else
-            Serial.println("Error sending packet");                    
+          if (result) {
+            if (udpPacketType == udpKeepAlive) DEBUG_PRINT("KeepAlive ");
+            else { DEBUG_PRINT("Space "); }
+            DEBUG_PRINTLN("packet away...");
+          } else {
+            DEBUG_PRINTLN("Error sending packet"); }                    
           toSend = 0;
           spaceStarted = 0;
         }
