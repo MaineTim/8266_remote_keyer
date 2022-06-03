@@ -366,16 +366,16 @@ int playSymInterruptable(int sym, int transmit, int pin, int condition) {
 
 // MORSE PLAYER FUNCTIONS
 
-void playChar(const char oneChar) {
+void playChar(const char oneChar, int transmit) {
   int inchar = 0;
 
   for (unsigned int j = 0; j < 8; j++) {
       int bit = morse_ascii[(int)oneChar] & (0x80 >> j);
       if (inchar) {
           if (bit)
-            playSym(symDah, SPKR, NO_REC, 0);
+            playSym(symDah, transmit, NO_REC, 0);
           else
-            playSym(symDit, SPKR, NO_REC, 0);
+            playSym(symDit, transmit, NO_REC, 0);
           if (j < 7) {
               delay(30);
           }
@@ -387,13 +387,13 @@ void playChar(const char oneChar) {
 }
 
 
-void playStr(const char *oneString) {
+void playStr(const char *oneString, int transmit) {
 
   for (unsigned int j = 0; j < strlen(oneString); j++) {
     if (oneString[j] == ' ')
       delay(500);
     else
-      playChar(oneString[j]);
+      playChar(oneString[j], transmit);
   }
 }
 
@@ -489,14 +489,14 @@ void playMemory(int memoryId) {
     int cmd = memory[memoryId][i];
 
     if (cmd == 0) {
-      int ret = playSymInterruptableVec(symDit, 1, pins, conditions, 2);
+      int ret = playSymInterruptableVec(symDit, TX, pins, conditions, 2);
       if (ret != -1) {
         delay(10);
         waitPin(ret, HIGH);
         return;
       }
     } else if (cmd == 1) {
-      int ret = playSymInterruptableVec(symDah, 1, pins, conditions, 2);
+      int ret = playSymInterruptableVec(symDah, TX, pins, conditions, 2);
       if (ret != -1) {
         delay(10);
         waitPin(ret, HIGH);
@@ -637,7 +637,7 @@ void setup() {
   EEPROM. begin(1024);
   loadStorage();
 
-  playChar('Q');
+  playChar('Q', SPKR);
   
 #ifdef CLIENT
   netMode = netClient;
@@ -658,13 +658,13 @@ void setup() {
   }
   if (netMode) {
     if (udp.begin(port) == 0)
-      playStr("NO PORT");
+      playStr("NO PORT", SPKR);
     else if (netMode == netClient) 
-        playChar('C');
+        playChar('C', SPKR);
       else
-        playChar('S');
+        playChar('S', SPKR);
   } else     
-playChar('R');
+playChar('R', SPKR);
 }
 
 
