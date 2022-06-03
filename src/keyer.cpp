@@ -145,7 +145,7 @@ const int storageMagic2 = 97;
 // CONFIG DEFAULTS
 
 int toneFreq = 700;                     // Default sidetone frequncy
-int ditMillis = 60;                     // Default speed
+unsigned int ditMillis = 60;                     // Default speed
 int currKeyerMode = keyerModeIambic;    // Default mode
 int iambicModeB = 1;                    // Default iambic mode
 
@@ -185,7 +185,7 @@ double spaceDuration = 0;
 unsigned int toSend = 0;
 uint16_t toChar = 0;
 uint16_t toLength = 0;
-int sinceLast = 0;
+unsigned int sinceLast = 0;
 
 DataPacket packet;
 
@@ -675,7 +675,6 @@ playChar('R');
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
   char frame[64];
-  char buffer[8];
 
   if (ditDetected) {
     playSym(symDit, TX, memoryId, 0);
@@ -706,18 +705,18 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
     if (spaceStarted == 0) 
       spaceStarted = millis();
     if (toChar && (netMode == netClient) && (millis() - sinceLast > ditMillis)) {
+      toChar = toChar << (16 - (toLength * 2));
       toSend = (toLength << 16) + toChar;
       packetCount++;
       packet.number = packetCount;
       packet.data = toSend;
       DEBUG_PRINTLN(packetCount);
-      sprintf(buffer, "%0x", packet.data);
-      DEBUG_PRINTLN(buffer);         
+      DEBUG_PRINTHEXLN(packet.data);         
       memcpy(frame, &packet, sizeof(packet));
       udp.beginPacket(host, port);
-      yield();
+      delay(0);
       udp.write(frame, sizeof(packet));
-      yield();
+      delay(0);
       int result = udp.endPacket();
       delay(50);
       if (result)
@@ -736,30 +735,36 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 
 void decodePacket(DataPacket packet) {
 
-  char buffer[8];
-
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
   uint16_t udpPacketType = frameLength >> 14;
-
+  unsigned int waitTime = frame;
+  unsigned int alreadyPast = millis() - sinceLast;
+ 
   switch (udpPacketType) {
       case udpKeepAlive:
-        // DEBUG_PRINTLN("KeepAlive");
+        DEBUG_PRINTLN("KeepAlive");
+        ditMillis = frame;
         break;
       case udpSpace:
         DEBUG_PRINTLN("Space");
+//        Serial.println(waitTime);
+//        Serial.println(alreadyPast);
+        if (waitTime > alreadyPast)
+          delay(waitTime - alreadyPast);
         break;
       case udpFrame:
         DEBUG_PRINTLN("Frame");       
+        for (int x = 0; x < frameLength; x++) {
+          unsigned int roll = (frame & 0xC000) >> 14;
+          frame = frame << 2;
+          delay(0);
+          DEBUG_PRINTBINLN(roll);
+          playSym(roll, TX, NO_REC, 0);
+        }
+        delay(ditMillis);
   }
   if (udpPacketType != udpKeepAlive) {
-    // sprintf(buffer, "%0x", packet.data);
-    // Serial.println(buffer);
-    // Serial.println(packet.number);
-    // sprintf(buffer, "%0x", frameLength);    
-    // Serial.println(buffer);
-    // sprintf(buffer, "%0x", frame);    
-    // Serial.println(buffer);
     DEBUG_PRINTHEXLN(packet.data);
     DEBUG_PRINTLN(packet.number);
     DEBUG_PRINTHEXLN(frameLength);
@@ -772,8 +777,6 @@ void decodePacket(DataPacket packet) {
 
 void loop() {
   char frame[64];
-  char buffer[8];
-  int len = 0;
 
   int A0_switch = 0;
 
@@ -783,8 +786,7 @@ void loop() {
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
-      len = udp.read(frame, 64);
-      // if (len > 0) frame[len] = '\0';
+      udp.read(frame, 64);
       memcpy(&packet, frame, sizeof(packet));
       decodePacket(packet);
     }
@@ -796,13 +798,11 @@ void loop() {
         uint16_t udpPacketType = 0;
         milliDuration = millis() - spaceStarted;
         if (milliDuration > 2000) {
+          spaceDuration = ditMillis;  //Keep server updated on speed.
           udpPacketType = udpKeepAlive;
-          spaceDuration = 0;
-          yield();
+          delay(0);
         } else if ((ditPressed || dahPressed) && (milliDuration > ditMillis * 3)) {
           spaceDuration = milliDuration;
-          spaceDuration /= ditMillis;
-          spaceDuration += 2.5;
           udpPacketType = udpSpace;
         }
         if (udpPacketType) {
@@ -812,9 +812,9 @@ void loop() {
           DEBUG_PRINTHEXLN(packet.data);
           memcpy(frame, &packet, sizeof(packet));
           udp.beginPacket(host, port);
-          yield();
+          delay(0);
           udp.write(frame, sizeof(packet));
-          yield();
+          delay(0);
           int result = udp.endPacket();
           if (milliDuration > 2000)
             delay(100);
