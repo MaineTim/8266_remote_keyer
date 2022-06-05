@@ -30,10 +30,17 @@
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 
+//  gpio pin to HIGH
+#define pinHigh(x) \
+    GPOS = (1 << x)
 
+//  gpio pin to LOW
+#define pinLow(x) \
+    GPOC = (1 << x)
+
+// #define DEBUG
 
 #include <Debug.h>
-
 
 #define SPKR 0
 #define TX 1
@@ -132,7 +139,7 @@ const int packetTypeMem2 = 22;
 
 const int udpFrame = 0;
 const int udpKeepAlive = 2;
-const int udpSpace = 3;
+const int udpAck = 3;
 
 
 // INTERNAL MEMORIES
@@ -170,22 +177,21 @@ struct DataPacket {
 
 int currState = stateIdle;
 int prevSymbol = 0; // 0=none, 1=dit, 2=dah
-// unsigned long whenStartedPress;
 int recording = 0;
 int currStorageOffset = 0;
 int playAlternate = 0;                  // Mode B completion flag
 int ditDetected = 0;                    // Dit paddle hit during Dah play
 int memSwitch = 0;                      // Memory switch set by readAnalog()
-int pcount = 1000;
 int netMode = netDisconnected;
 unsigned long spaceStarted = 0;
 unsigned long milliDuration = 0;
-unsigned int packetCount = 0;
-double spaceDuration = 0;
+unsigned long sinceLast = 0;
+unsigned long gap = 0;
+uint16_t packetCount = 0;
 unsigned int toSend = 0;
 uint16_t toChar = 0;
 uint16_t toLength = 0;
-unsigned int sinceLast = 0;
+int lastPacketType = 0;
 
 DataPacket packet;
 
@@ -198,15 +204,6 @@ void memRecord(int memoryId, int value);
 
 
 // LOW LEVEL FUNCTIONS
-
-// Toggle pin for debug signalling.
-void pulsePin(int pin, int count) {
-  while (count-- > 0) {
-    digitalWrite(pin, HIGH);
-    digitalWrite(pin, LOW);
-  }
-}
-
 
 // Read the analog pin and assign a value to
 // global memSwitch.
@@ -345,13 +342,16 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 
 
 void playSym(int sym, int transmit, int memoryId, int toRecord) {
+
+  unsigned int newGap = millis() - sinceLast;
+  if (newGap > 5)
+    gap = newGap + ditMillis;
+
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
   if (memoryId) memRecord(memoryId, toRecord);
   if ((netMode == netClient) && transmit) {
     toChar = (toChar << 2) + sym;
     toLength++;
-
-    DEBUG_PRINTLN(toChar);
   }
   sinceLast = millis();
 }
@@ -631,6 +631,8 @@ void setup() {
   
   pinMode(pinDebug, OUTPUT);
   digitalWrite(pinDebug, LOW);
+  pinMode(D2, OUTPUT);
+  digitalWrite(D2, LOW);
   pinMode(pinStatusLed, OUTPUT);
   pinMode(pinMosfet, OUTPUT);
   pinMode(pinSpeaker, OUTPUT);
@@ -670,17 +672,34 @@ playChar('R', SPKR);
 
 // SYMBOL AQUISITION FUNCTIONS
 
+void sendPacket(unsigned int sendData, unsigned long spacing) {
+
+  char frame[10];
+
+  packetCount++;
+  packet.number = (spacing << 16) + packetCount;
+  packet.data = sendData;
+  memcpy(frame, &packet, sizeof(packet));
+  udp.beginPacket(host, port);
+  delay(0);
+  udp.write(frame, sizeof(packet));
+  delay(0);
+  udp.endPacket();
+  delay(50);
+}
+
+
 // Takes the current state of the paddles and does the right thing with it. Handles element
 // comnpletion, passes along TX state, and memory location for recording.
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
-  char frame[64];
-
   if (ditDetected) {
+    pinHigh(D2);
     playSym(symDit, TX, memoryId, 0);
     ditDetected = 0;
     playAlternate = 0;
     ditPressed = 0;
+    pinLow(D2);
   }
   if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
     if (prevSymbol == symDah) { playSym(symDit, TX, memoryId, 0); }
@@ -707,22 +726,8 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
     if (toChar && (netMode == netClient) && (millis() - sinceLast > ditMillis)) {
       toChar = toChar << (16 - (toLength * 2));
       toSend = (toLength << 16) + toChar;
-      packetCount++;
-      packet.number = packetCount;
-      packet.data = toSend;
-      DEBUG_PRINTLN(packetCount);
-      DEBUG_PRINTHEXLN(packet.data);         
-      memcpy(frame, &packet, sizeof(packet));
-      udp.beginPacket(host, port);
-      delay(0);
-      udp.write(frame, sizeof(packet));
-      delay(0);
-      int result = udp.endPacket();
-      delay(50);
-      if (result)
-        DEBUG_PRINTLN("Frame packet away...");
-      else {
-        DEBUG_PRINTLN("Error sending packet"); }                   
+      sendPacket(toSend, gap);
+      lastPacketType = udpFrame;
       toSend = 0;
       toChar = 0;
       toLength = 0;
@@ -735,40 +740,32 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 
 void decodePacket(DataPacket packet) {
 
+  int spacing = int(packet.number >> 16);
+  uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
   uint16_t udpPacketType = frameLength >> 14;
-  unsigned int waitTime = frame;
-  unsigned int alreadyPast = millis() - sinceLast;
  
   switch (udpPacketType) {
       case udpKeepAlive:
-        DEBUG_PRINTLN("KeepAlive");
         ditMillis = frame;
-        break;
-      case udpSpace:
-        DEBUG_PRINTLN("Space");
-//        Serial.println(waitTime);
-//        Serial.println(alreadyPast);
-        if (waitTime > alreadyPast)
-          delay(waitTime - alreadyPast);
+        sendPacket((udpAck << 30), 0);        
         break;
       case udpFrame:
-        DEBUG_PRINTLN("Frame");       
+        int alreadyPassed = (int) (millis() - sinceLast) - ditMillis;
+        if (spacing > alreadyPassed) {
+          pinHigh(pinDebug);
+          int waitTime = spacing - alreadyPassed - 70;
+          if (waitTime > 10) 
+            delay(waitTime);
+          pinLow(pinDebug);
+        }
         for (int x = 0; x < frameLength; x++) {
           unsigned int roll = (frame & 0xC000) >> 14;
           frame = frame << 2;
           delay(0);
-          DEBUG_PRINTBINLN(roll);
           playSym(roll, TX, NO_REC, 0);
         }
-        delay(ditMillis);
-  }
-  if (udpPacketType != udpKeepAlive) {
-    DEBUG_PRINTHEXLN(packet.data);
-    DEBUG_PRINTLN(packet.number);
-    DEBUG_PRINTHEXLN(frameLength);
-    DEBUG_PRINTHEXLN(frame);
   }
 }
 
@@ -776,7 +773,7 @@ void decodePacket(DataPacket packet) {
 // MAIN FUNCTIONS
 
 void loop() {
-  char frame[64];
+  char frame[10];
 
   int A0_switch = 0;
 
@@ -786,7 +783,7 @@ void loop() {
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
-      udp.read(frame, 64);
+      udp.read(frame, 10);
       memcpy(&packet, frame, sizeof(packet));
       decodePacket(packet);
     }
@@ -795,37 +792,13 @@ void loop() {
 
       if (spaceStarted && netMode == netClient) {
         toSend  = 0;
-        uint16_t udpPacketType = 0;
         milliDuration = millis() - spaceStarted;
         if (milliDuration > 2000) {
-          spaceDuration = ditMillis;  //Keep server updated on speed.
-          udpPacketType = udpKeepAlive;
-          delay(0);
-        } else if ((ditPressed || dahPressed) && (milliDuration > ditMillis * 3)) {
-          spaceDuration = milliDuration;
-          udpPacketType = udpSpace;
-        }
-        if (udpPacketType) {
-          packet.number = ++packetCount;
-          packet.data = (udpPacketType << 30) + (int)spaceDuration;
-          DEBUG_PRINTLN(packetCount);
-          DEBUG_PRINTHEXLN(packet.data);
-          memcpy(frame, &packet, sizeof(packet));
-          udp.beginPacket(host, port);
-          delay(0);
-          udp.write(frame, sizeof(packet));
-          delay(0);
-          int result = udp.endPacket();
-          if (milliDuration > 2000)
-            delay(100);
-          if (result) {
-            if (udpPacketType == udpKeepAlive) DEBUG_PRINT("KeepAlive ");
-            else { DEBUG_PRINT("Space "); }
-            DEBUG_PRINTLN("packet away...");
-          } else {
-            DEBUG_PRINTLN("Error sending packet"); }                    
+          sendPacket((udpKeepAlive << 30) + ditMillis, 0);
+          lastPacketType = udpKeepAlive;
           toSend = 0;
           spaceStarted = 0;
+          sinceLast = millis();
         }
       }
 
