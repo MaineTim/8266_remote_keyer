@@ -654,6 +654,8 @@ void setup() {
   digitalWrite(pinDebug, LOW);
   pinMode(D2, OUTPUT);
   digitalWrite(D2, LOW);
+  pinMode(D3, OUTPUT);
+  digitalWrite(D3, LOW); 
   pinMode(pinStatusLed, OUTPUT);
   pinMode(pinMosfet, OUTPUT);
   pinMode(pinSpeaker, OUTPUT);
@@ -706,7 +708,9 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   delay(0);
   udp.write(frame, sizeof(packet));
   delay(0);
+  pinHigh(D2);
   udp.endPacket();
+  pinLow(D2);
   delay(50);
 }
 
@@ -803,7 +807,9 @@ void loop() {
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
+      pinHigh(D3);
       udp.read(frame, 10);
+      pinLow(D3);
       memcpy(&packet, frame, sizeof(packet));
       decodePacket(packet);
     }
@@ -814,13 +820,11 @@ void loop() {
         toSend  = 0;
         milliDuration = millis() - spaceStarted;
         if (milliDuration > 2000) {
-          pinHigh(D2);
           sendPacket((udpKeepAlive << 30) + ditMillis, 0);
           lastPacketType = udpKeepAlive;
           toSend = 0;
           spaceStarted = 0;
           sinceLast = millis();
-          pinLow(D2);
         }
       }
 
