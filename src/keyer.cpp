@@ -38,7 +38,7 @@
 #define pinLow(x) \
     GPOC = (1 << x)
 
-// #define DEBUG
+#define DEBUG
 
 #include <Debug.h>
 
@@ -201,6 +201,7 @@ DataPacket packet;
 void dumpSettingsToStorage();
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId);
 void memRecord(int memoryId, int value);
+void sendPacket(unsigned int sendData, unsigned long spacing);
 
 
 // LOW LEVEL FUNCTIONS
@@ -332,6 +333,11 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
   digitalWrite(pinStatusLed, recording ? HIGH : LOW);
   digitalWrite(pinMosfet, LOW);
 
+  if ((netMode == netClient) && transmit) {
+    toChar = (toChar << 2) + sym;
+    toLength++;
+  }
+
   if (ret != -1) return ret;
 
   ret = delayInterruptable(ditMillis, pins, conditions, numPins);
@@ -349,10 +355,6 @@ void playSym(int sym, int transmit, int memoryId, int toRecord) {
 
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
   if (memoryId) memRecord(memoryId, toRecord);
-  if ((netMode == netClient) && transmit) {
-    toChar = (toChar << 2) + sym;
-    toLength++;
-  }
   sinceLast = millis();
 }
 
@@ -376,14 +378,11 @@ void playChar(const char oneChar, int transmit) {
             playSym(symDah, transmit, NO_REC, 0);
           else
             playSym(symDit, transmit, NO_REC, 0);
-          if (j < 7) {
-              delay(30);
-          }
       } else if (bit) {
           inchar = 1;
       }
   }
-  delay(100);
+  delay(ditMillis * 2);
 }
 
 
@@ -391,10 +390,21 @@ void playStr(const char *oneString, int transmit) {
 
   for (unsigned int j = 0; j < strlen(oneString); j++) {
     if (oneString[j] == ' ')
-      delay(500);
+      delay(ditMillis * 7);
     else
       playChar(oneString[j], transmit);
   }
+}
+
+
+void playSpeed() {
+
+  char frame[10];
+
+  itoa(ditMillis, frame, 10);
+  delay(250);
+  playStr(frame, SPKR);
+  delay(250);
 }
 
 
@@ -484,28 +494,39 @@ void playMemory(int memoryId) {
 
   int pins[2] = { pinKeyDit, pinKeyDah };
   int conditions[2] = { LOW, LOW };
+  int newChar = 0;
+  toSend = 0;
+  toChar = 0;
+  toLength = 0;
 
   for (size_t i=0; i < memorySize[memoryId]; i++) {
     int cmd = memory[memoryId][i];
-
-    if (cmd == 0) {
-      int ret = playSymInterruptableVec(symDit, TX, pins, conditions, 2);
+    Serial.println(cmd);
+    if (cmd == 0 || cmd == 1)
+    {
+      if (newChar) {
+        toChar = toChar << (16 - (toLength * 2));
+        toSend = (toLength << 16) + toChar;
+        sendPacket(toSend, gap);
+        lastPacketType = udpFrame;
+        toSend = 0;
+        toChar = 0;
+        toLength = 0;
+        spaceStarted = 0;
+        newChar = 0;
+      }
+      int ret = playSymInterruptableVec(cmd+1, TX, pins, conditions, 2);
       if (ret != -1) {
-        delay(10);
+//        delay(10);
         waitPin(ret, HIGH);
         return;
       }
-    } else if (cmd == 1) {
-      int ret = playSymInterruptableVec(symDah, TX, pins, conditions, 2);
-      if (ret != -1) {
-        delay(10);
-        waitPin(ret, HIGH);
-        return;
-      }
-    } else {
+    } else if (cmd > 4) {
       int duration = cmd - 2;
       duration *= ditMillis;
       delay(duration);
+      gap = duration;
+      newChar = 1;
     }
   }
 }
@@ -639,7 +660,7 @@ void setup() {
   EEPROM. begin(1024);
   loadStorage();
 
-  playChar('Q', SPKR);
+  playSpeed();
   
 #ifdef CLIENT
   netMode = netClient;
@@ -650,6 +671,7 @@ void setup() {
 #endif
 
   if (netMode == netClient || netMode == netServer) {
+    WiFi.setSleepMode(WIFI_NONE_SLEEP);
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
@@ -694,12 +716,10 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
   if (ditDetected) {
-    pinHigh(D2);
     playSym(symDit, TX, memoryId, 0);
     ditDetected = 0;
     playAlternate = 0;
     ditPressed = 0;
-    pinLow(D2);
   }
   if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
     if (prevSymbol == symDah) { playSym(symDit, TX, memoryId, 0); }
@@ -740,8 +760,8 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 
 void decodePacket(DataPacket packet) {
 
-  int spacing = int(packet.number >> 16);
-  uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
+  int spacing = (int)(packet.number >> 16);
+  // uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
   uint16_t udpPacketType = frameLength >> 14;
@@ -755,7 +775,7 @@ void decodePacket(DataPacket packet) {
         int alreadyPassed = (int) (millis() - sinceLast) - ditMillis;
         if (spacing > alreadyPassed) {
           pinHigh(pinDebug);
-          int waitTime = spacing - alreadyPassed - 70;
+          int waitTime = spacing - alreadyPassed - (ditMillis * 2);
           if (waitTime > 10) 
             delay(waitTime);
           pinLow(pinDebug);
@@ -794,11 +814,13 @@ void loop() {
         toSend  = 0;
         milliDuration = millis() - spaceStarted;
         if (milliDuration > 2000) {
+          pinHigh(D2);
           sendPacket((udpKeepAlive << 30) + ditMillis, 0);
           lastPacketType = udpKeepAlive;
           toSend = 0;
           spaceStarted = 0;
           sinceLast = millis();
+          pinLow(D2);
         }
       }
 
@@ -807,10 +829,10 @@ void loop() {
     // Enter the speed set mode with a short press of the setup button
     if (digitalRead(pinSetup) == LOW) {
       unsigned long whenStartedPress = millis();
-      int nextState = stateSettingSpeed;
-      
+      int nextState = stateSettingSpeed;      
+
       delay(5);
-        
+
       while (digitalRead(pinSetup) == LOW) {
         // 3 seconds to enter advanced configuration mode
         if (millis() > whenStartedPress + 1000) {
@@ -865,12 +887,13 @@ void loop() {
   } else if (currState == stateSettingSpeed) {
     if (playSymInterruptable(symDit, 0, pinSetup, LOW) != -1) {
       currState = stateIdle;
+      saveStorageInt(packetTypeSpeed, ditMillis);      
       waitPin(pinSetup, HIGH);
       return;
     }
     if (ditPressed) ditMillis = scaleDown(ditMillis, 1/1.05, 20);
     if (dahPressed) ditMillis = scaleUp(ditMillis, 1.05, 800);
-    saveStorageInt(packetTypeSpeed, ditMillis);
+    if (ditPressed || dahPressed) playSpeed();
   } else if (currState == stateSettingTone) {
     if (playSymInterruptable(symDit, 0, pinSetup, LOW) != -1) {
       currState = stateIdle;
