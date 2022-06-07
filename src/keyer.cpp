@@ -29,6 +29,8 @@
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
+#include<CircularBuffer.h>
+
 
 //  gpio pin to HIGH
 #define pinHigh(x) \
@@ -172,6 +174,8 @@ struct DataPacket {
   unsigned int data;
 };
 
+CircularBuffer < DataPacket, 10> packets;
+
 
 // RUN STATE
 
@@ -192,6 +196,8 @@ unsigned int toSend = 0;
 uint16_t toChar = 0;
 uint16_t toLength = 0;
 int lastPacketType = 0;
+int playNextPacket = 0;
+
 
 DataPacket packet;
 
@@ -762,34 +768,46 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 }
 
 
-void decodePacket(DataPacket packet) {
+void playPacket(DataPacket packet) {
 
+  pinHigh(pinDebug);
   int spacing = (int)(packet.number >> 16);
   // uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
-  uint16_t udpPacketType = frameLength >> 14;
  
-  switch (udpPacketType) {
-      case udpKeepAlive:
-        ditMillis = frame;
-        sendPacket((udpAck << 30), 0);        
-        break;
-      case udpFrame:
-        int alreadyPassed = (int) (millis() - sinceLast) - ditMillis;
-        if (spacing > alreadyPassed) {
-          pinHigh(pinDebug);
-          int waitTime = spacing - alreadyPassed - (ditMillis * 2);
-          if (waitTime > 10) 
-            delay(waitTime);
-          pinLow(pinDebug);
-        }
-        for (int x = 0; x < frameLength; x++) {
-          unsigned int roll = (frame & 0xC000) >> 14;
-          frame = frame << 2;
-          delay(0);
-          playSym(roll, TX, NO_REC, 0);
-        }
+  int alreadyPassed = (int) (millis() - sinceLast) - ditMillis;
+  if (spacing > alreadyPassed) {
+//    pinHigh(pinDebug);
+    int waitTime = spacing - alreadyPassed - (ditMillis * 2);
+    if (waitTime > 10) 
+      delay(waitTime);
+//    pinLow(pinDebug);
+  }
+  pinLow(pinDebug);
+  for (int x = 0; x < frameLength; x++) {
+    unsigned int roll = (frame & 0xC000) >> 14;
+    frame = frame << 2;
+    delay(0);
+    playSym(roll, TX, NO_REC, 0);
+  }
+}
+
+
+void parsePacket(DataPacket packet) {
+
+  uint16_t updPacketType = packet.data >> 30;
+  uint16_t frame = (uint16_t) packet.data;
+
+  switch (updPacketType) {
+    case udpKeepAlive:
+      ditMillis = frame;
+      sendPacket((udpAck << 30), 0);        
+      if (!packets.isEmpty()) { playNextPacket = 1; }
+      else playNextPacket = 0;
+      break;
+    case udpFrame:
+      packets.push(packet);
   }
 }
 
@@ -811,7 +829,12 @@ void loop() {
       udp.read(frame, 10);
       pinLow(D3);
       memcpy(&packet, frame, sizeof(packet));
-      decodePacket(packet);
+      parsePacket(packet);
+    }
+    if (packets.size() > 2) { playNextPacket = 1; }
+    if (playNextPacket && (!packets.isEmpty())) {
+      packet = packets.shift();
+      playPacket(packet);
     }
   } else if (currState == stateIdle) {
       A0_switch = readAnalog();
