@@ -179,9 +179,9 @@ int playAlternate = 0;                  // Mode B completion flag
 int ditDetected = 0;                    // Dit paddle hit during Dah play
 int memSwitch = 0;                      // Memory switch set by readAnalog()
 int netMode = netDisconnected;
-unsigned long spaceStarted = 0;
+unsigned long lastPacketSentTime = 0;
 unsigned long milliDuration = 0;
-unsigned long sinceLast = 0;
+unsigned long lastSymPlayedTime = 0;
 unsigned long gap = 0;
 uint16_t packetCount = 0;
 unsigned int toSend = 0;
@@ -349,13 +349,13 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 
 void playSym(int sym, int transmit, int memoryId, int toRecord) {
 
-  unsigned int newGap = millis() - sinceLast;
+  unsigned int newGap = millis() - lastSymPlayedTime;
   if (newGap > 5)
     gap = newGap + ditMillis;
 
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
   if (memoryId) memRecord(memoryId, toRecord);
-  sinceLast = millis();
+  lastSymPlayedTime = millis();
 }
 
 
@@ -427,29 +427,29 @@ void setMemory(int memoryId, int pin, int inverted) {
 //  digitalWrite(pinStatusLed, HIGH);
   recording = 1;
 
-  unsigned long loc_spaceStarted = 0;
+  unsigned long spaceStarted = 0;
   
   while(1) {
     delay(0);
     int ditPressed = (digitalRead(pinKeyDit) == LOW);
     int dahPressed = (digitalRead(pinKeyDah) == LOW);
 
-    if ((ditPressed || dahPressed) && loc_spaceStarted) {
+    if ((ditPressed || dahPressed) && spaceStarted) {
       // record a space
-      double spaceDuration = millis() - loc_spaceStarted;
+      double spaceDuration = millis() - spaceStarted;
       DEBUG_PRINTLN_DOUBLE(spaceDuration, 2);
       spaceDuration /= (ditMillis / 3);
       spaceDuration += 2.5;
       int toRecord = spaceDuration;
       if (toRecord > 255) toRecord = 255;
       memRecord(memoryId, toRecord);
-      loc_spaceStarted = 0;
+      spaceStarted = 0;
     }
 
     processPaddles(ditPressed, dahPressed, SPKR, memoryId);
 
     if (prevSymbol) {
-      loc_spaceStarted = millis();
+      spaceStarted = millis();
       prevSymbol = 0;
     }
 
@@ -514,7 +514,6 @@ void playMemory(int memoryId) {
         toSend = 0;
         toChar = 0;
         toLength = 0;
-        spaceStarted = 0;
         newChar = 0;
       }
       DEBUG_PRINTLN();
@@ -716,6 +715,7 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   udp.endPacket();
   PINLOW(D2);
   delay(50);
+  lastPacketSentTime = millis();
 }
 
 
@@ -749,12 +749,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
       else playSym(symDah, TX, memoryId, 1);
       playAlternate = 0;
     }
-    if (spaceStarted == 0) {
-      PINHIGH(D1);
-      spaceStarted = millis();
-      PINLOW(D1);
-    }
-    if (toChar && (netMode == netClient) && (millis() - sinceLast > ditMillis)) {
+    if (toChar && (netMode == netClient) && (millis() - lastSymPlayedTime > ditMillis)) {
       toChar = toChar << (16 - (toLength * 2));
       toSend = (toLength << 16) + toChar;
       sendPacket(toSend, gap);
@@ -762,7 +757,6 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
       toSend = 0;
       toChar = 0;
       toLength = 0;
-      spaceStarted = 0;
     }
     prevSymbol = 0;
   }
@@ -777,7 +771,7 @@ void playPacket(DataPacket packet) {
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
  
-  int alreadyPassed = (int) (millis() - sinceLast) - ditMillis;
+  int alreadyPassed = (int) (millis() - lastSymPlayedTime) - ditMillis;
   if (spacing > alreadyPassed) {
     int waitTime = spacing - alreadyPassed - (ditMillis * 2);
     if (waitTime > 10) 
@@ -838,15 +832,14 @@ void loop() {
   } else if (currState == stateIdle) {
       A0_switch = readAnalog();
 
-      if (spaceStarted && netMode == netClient) {
+      if (lastPacketSentTime && netMode == netClient) {
         toSend  = 0;
-        milliDuration = millis() - spaceStarted;
+        milliDuration = millis() - lastPacketSentTime;
         if (milliDuration > 2000) {
           sendPacket((udpKeepAlive << 30) + ditMillis, 0);
           lastPacketType = udpKeepAlive;
           toSend = 0;
-          spaceStarted = 0;
-          sinceLast = millis();
+          lastSymPlayedTime = millis();
         }
       }
 
