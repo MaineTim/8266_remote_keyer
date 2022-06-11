@@ -23,22 +23,15 @@
 // 2022-05-24 - Fixed dot completion.
 // 2022-05-25 - Create processPaddles(), use it for both main loop and memory recording.
 // 2022-05-26 - Add CW player, network init code (TODO: get network code working.)
+// 2022-06-07 - Finalize basic network code, add ring buffer, tighten timimgs.
 
 
 #include <Arduino.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
-#include<CircularBuffer.h>
-
-
-//  gpio pin to HIGH
-#define pinHigh(x) \
-    GPOS = (1 << x)
-
-//  gpio pin to LOW
-#define pinLow(x) \
-    GPOC = (1 << x)
+#include <CircularBuffer.h>
+#include <Pinflip.h>
 
 #define DEBUG
 
@@ -91,7 +84,6 @@ const unsigned char morse_ascii[] = {
 
 // PINS
 
-const int pinDebug = D1;
 const int pinSetup = D7;               // Press Setup (Adjust speed and tone)
 const int pinKeyDit = D5;              // Key, dit paddle
 const int pinKeyDah = D6;              // Key, dah paddle
@@ -330,13 +322,15 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
   prevSymbol = sym;
 
   tone(pinSpeaker, toneFreq);
-  digitalWrite(pinStatusLed, recording ? LOW : HIGH);
+  digitalWrite(pinStatusLed, HIGH);
+//  digitalWrite(pinStatusLed, recording ? LOW : HIGH);
   if (transmit) digitalWrite(pinMosfet, HIGH);
   
   int ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
 
   noTone(pinSpeaker);
-  digitalWrite(pinStatusLed, recording ? HIGH : LOW);
+  digitalWrite(pinStatusLed, LOW);
+//  digitalWrite(pinStatusLed, recording ? HIGH : LOW);
   digitalWrite(pinMosfet, LOW);
 
   if ((netMode == netClient) && transmit) {
@@ -430,19 +424,21 @@ void setMemory(int memoryId, int pin, int inverted) {
   delay(50);
   playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
-  digitalWrite(pinStatusLed, HIGH);
+//  digitalWrite(pinStatusLed, HIGH);
   recording = 1;
 
   unsigned long loc_spaceStarted = 0;
   
   while(1) {
+    delay(0);
     int ditPressed = (digitalRead(pinKeyDit) == LOW);
     int dahPressed = (digitalRead(pinKeyDah) == LOW);
 
     if ((ditPressed || dahPressed) && loc_spaceStarted) {
       // record a space
       double spaceDuration = millis() - loc_spaceStarted;
-      spaceDuration /= ditMillis;
+      DEBUG_PRINTLN_DOUBLE(spaceDuration, 2);
+      spaceDuration /= (ditMillis / 3);
       spaceDuration += 2.5;
       int toRecord = spaceDuration;
       if (toRecord > 255) toRecord = 255;
@@ -468,7 +464,7 @@ void setMemory(int memoryId, int pin, int inverted) {
   
   saveStorageMemory(memoryId);
   
-  digitalWrite(pinStatusLed, LOW);
+//  digitalWrite(pinStatusLed, LOW);
   recording = 0;
 
   tone(pinSpeaker, 1300);
@@ -507,7 +503,7 @@ void playMemory(int memoryId) {
 
   for (size_t i=0; i < memorySize[memoryId]; i++) {
     int cmd = memory[memoryId][i];
-    Serial.println(cmd);
+    DEBUG_PRINTLN(cmd);
     if (cmd == 0 || cmd == 1)
     {
       if (newChar) {
@@ -521,6 +517,7 @@ void playMemory(int memoryId) {
         spaceStarted = 0;
         newChar = 0;
       }
+      DEBUG_PRINTLN();
       int ret = playSymInterruptableVec(cmd+1, TX, pins, conditions, 2);
       if (ret != -1) {
 //        delay(10);
@@ -529,10 +526,11 @@ void playMemory(int memoryId) {
       }
     } else if (cmd > 4) {
       int duration = cmd - 2;
-      duration *= ditMillis;
+      duration *= (ditMillis / 3);
       delay(duration);
       gap = duration;
       newChar = 1;
+      DEBUG_PRINTLN(gap);
     }
   }
 }
@@ -556,7 +554,7 @@ void checkMemoryPin(int memoryId, int pin, int inverted) {
         playSym(symDit, SPKR, NO_REC, 0);
         delay(500);
         playSym(symDit, SPKR, NO_REC, 0);
-        digitalWrite(pinStatusLed, HIGH);
+//        digitalWrite(pinStatusLed, HIGH);
         doingSet = 1;
       }
     }
@@ -610,7 +608,7 @@ void factoryReset() {
 
 void loadStorage() {
   // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
-  int resetRequested = (digitalRead(pinSetup) == LOW);
+  int resetRequested = (digitalRead(pinKeyDit) == LOW) && (digitalRead(pinKeyDah) == LOW);
 
   if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) factoryReset();
 
@@ -656,8 +654,8 @@ void setup() {
   pinMode(pinKeyDit, INPUT_PULLUP);
   pinMode(pinKeyDah, INPUT_PULLUP);
   
-  pinMode(pinDebug, OUTPUT);
-  digitalWrite(pinDebug, LOW);
+  pinMode(D1, OUTPUT);
+  digitalWrite(D1, LOW);
   pinMode(D2, OUTPUT);
   digitalWrite(D2, LOW);
   pinMode(D3, OUTPUT);
@@ -714,9 +712,9 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   delay(0);
   udp.write(frame, sizeof(packet));
   delay(0);
-  pinHigh(D2);
+  PINHIGH(D2);
   udp.endPacket();
-  pinLow(D2);
+  PINLOW(D2);
   delay(50);
 }
 
@@ -751,8 +749,11 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
       else playSym(symDah, TX, memoryId, 1);
       playAlternate = 0;
     }
-    if (spaceStarted == 0) 
+    if (spaceStarted == 0) {
+      PINHIGH(D1);
       spaceStarted = millis();
+      PINLOW(D1);
+    }
     if (toChar && (netMode == netClient) && (millis() - sinceLast > ditMillis)) {
       toChar = toChar << (16 - (toLength * 2));
       toSend = (toLength << 16) + toChar;
@@ -770,7 +771,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 
 void playPacket(DataPacket packet) {
 
-  pinHigh(pinDebug);
+//  PINHIGH(D1);
   int spacing = (int)(packet.number >> 16);
   // uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
@@ -778,13 +779,11 @@ void playPacket(DataPacket packet) {
  
   int alreadyPassed = (int) (millis() - sinceLast) - ditMillis;
   if (spacing > alreadyPassed) {
-//    pinHigh(pinDebug);
     int waitTime = spacing - alreadyPassed - (ditMillis * 2);
     if (waitTime > 10) 
       delay(waitTime);
-//    pinLow(pinDebug);
   }
-  pinLow(pinDebug);
+//  PINLOW(D1);
   for (int x = 0; x < frameLength; x++) {
     unsigned int roll = (frame & 0xC000) >> 14;
     frame = frame << 2;
@@ -825,9 +824,9 @@ void loop() {
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
-      pinHigh(D3);
+      PINHIGH(D3);
       udp.read(frame, 10);
-      pinLow(D3);
+      PINLOW(D3);
       memcpy(&packet, frame, sizeof(packet));
       parsePacket(packet);
     }
@@ -863,7 +862,7 @@ void loop() {
       while (digitalRead(pinSetup) == LOW) {
         // 3 seconds to enter advanced configuration mode
         if (millis() > whenStartedPress + 1000) {
-          digitalWrite(pinStatusLed, HIGH);
+//          digitalWrite(pinStatusLed, HIGH);
           nextState = stateSettingTone;
         }
         A0_switch = readAnalog();
