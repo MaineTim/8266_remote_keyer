@@ -182,7 +182,7 @@ int ditDetected = 0;                    // Dit paddle hit during Dah play
 int memSwitch = 0;                      // Memory switch set by readAnalog()
 int netMode = netDisconnected;
 unsigned long lastPacketSentTime = 0;
-unsigned long milliDuration = 0;
+unsigned long keepAliveTimer = 0;
 unsigned long lastSymPlayedTime = 0;
 unsigned long gap = 0;
 uint16_t packetCount = 0;
@@ -704,7 +704,9 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   delay(0);
   udp.write(frame, sizeof(packet));
   delay(0);
+  PINHIGH(D3);
   udp.endPacket();
+  PINLOW(D3);
   delay(50);
   lastPacketSentTime = millis();
 }
@@ -750,6 +752,15 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
       toLength = 0;
     }
     prevSymbol = 0;
+  }
+  if (toLength == 8) {
+    toChar = toChar << (16 - (toLength * 2));
+    toSend = (toLength << 16) + toChar;
+    sendPacket(toSend, gap);
+    lastPacketType = udpFrame;
+    toSend = 0;
+    toChar = 0;
+    toLength = 0;
   }
 }
 
@@ -829,8 +840,8 @@ void loop() {
 
       if (lastPacketSentTime && netMode == netClient) {
         toSend  = 0;
-        milliDuration = millis() - lastPacketSentTime;
-        if (milliDuration > 2000) {
+        keepAliveTimer = millis() - lastPacketSentTime;
+        if (keepAliveTimer > 2000 && (!ditPressed && !dahPressed) && !toChar) {
           sendPacket((udpKeepAlive << 30) + ditMillis, 0);
           lastPacketType = udpKeepAlive;
           toSend = 0;
