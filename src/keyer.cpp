@@ -210,10 +210,10 @@ void sendPacket(unsigned int sendData, unsigned long spacing);
 // global memSwitch.
 int readAnalog() {
   int value = analogRead(PIN_A0);
-  if (value < 100) return 0;
-  else if (value > 400 && value < 600) return 1;
-  else if (value > 600 && value < 900) return 2;
-  else if (value > 900) return 3;
+  if (value < 100) { return 0; }
+  else if (value > 400 && value < 600) { return 1; }
+  else if (value > 600 && value < 900) { return 2; }
+  else if (value > 900) { return 3; } 
   return(0);
 }
 
@@ -265,9 +265,9 @@ void saveStorageMemory(int memoryId) {
   }
 
   int type = 0;
-  if (memoryId == 0) type = packetTypeMem0;
-  else if (memoryId == 1) type = packetTypeMem1;
-  else if (memoryId == 2) type = packetTypeMem2;
+  if (memoryId == 0) { type = packetTypeMem0; }
+  else if (memoryId == 1) { type = packetTypeMem1; }
+  else if (memoryId == 2) { type = packetTypeMem2; }
 
   EEPROM.write(currStorageOffset++, type);
   EEPROM.write(currStorageOffset++, (memorySize[memoryId] >> 8) & 0xFF);
@@ -284,11 +284,11 @@ void dumpSettingsToStorage() {
   currStorageOffset = 2;
   saveStorageInt(packetTypeSpeed, ditMillis);
   saveStorageInt(packetTypeFreq, toneFreq);
-  if (currKeyerMode == keyerModeVibroplex) saveStorageEmptyPacket(packetTypeKeyerModeVibroplex);
-  else if (currKeyerMode == keyerModeStraight) saveStorageEmptyPacket(packetTypeKeyerModeStraight);
-  if (memorySize[0]) saveStorageMemory(0);
-  if (memorySize[1]) saveStorageMemory(1);
-  if (memorySize[2]) saveStorageMemory(2);
+  if (currKeyerMode == keyerModeVibroplex) { saveStorageEmptyPacket(packetTypeKeyerModeVibroplex); }
+  else if (currKeyerMode == keyerModeStraight) { saveStorageEmptyPacket(packetTypeKeyerModeStraight); }
+  if (memorySize[0]) { saveStorageMemory(0); }
+  if (memorySize[1]) { saveStorageMemory(1); }
+  if (memorySize[2]) { saveStorageMemory(2); }
 }
 
 
@@ -300,13 +300,13 @@ int delayInterruptable(int ms, int *pins, const int *conditions, size_t numPins)
   unsigned long finish = millis() + ms;
 
   while(1) {
-    if (ms != -1 && millis() > finish) return -1;
+    if (ms != -1 && millis() > finish) { return -1; }
 
     if (prevSymbol == symDah) {
       if (!ditDetected) { ditDetected = !digitalRead(pinKeyDit); }
     }
     for (size_t i=0; i < numPins; i++) {
-      if (digitalRead(pins[i]) == conditions[i]) return pins[i];
+      if (digitalRead(pins[i]) == conditions[i]) { return pins[i]; }
     }
   }
 }
@@ -321,12 +321,16 @@ void waitPin(int pin, int condition) {
 
 
 int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, size_t numPins) {
+
+  unsigned int newGap = millis() - lastSymPlayedTime;
+  if (newGap > 5) { gap = newGap + ditMillis; }
+
   prevSymbol = sym;
 
   tone(pinSpeaker, toneFreq);
   digitalWrite(pinStatusLed, HIGH);
 //  digitalWrite(pinStatusLed, recording ? LOW : HIGH);
-  if (transmit) digitalWrite(pinMosfet, HIGH);
+  if (transmit) { digitalWrite(pinMosfet, HIGH); }
   
   int ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
 
@@ -340,22 +344,22 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
     toLength++;
   }
 
-  if (ret != -1) return ret;
+  if (ret != -1) { return ret; }
 
   ret = delayInterruptable(ditMillis, pins, conditions, numPins);
-  if (ret != -1) return ret;
-  
+  if (ret != -1) { return ret; }
+
+  lastSymPlayedTime = millis();  
   return -1;
 }
 
 
 void playSym(int sym, int transmit, int memoryId, int toRecord) {
 
-  unsigned int newGap = millis() - lastSymPlayedTime;
-  if (newGap > 5) { gap = newGap + ditMillis; }
+
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
-  if (memoryId) memRecord(memoryId, toRecord);
-  lastSymPlayedTime = millis();
+  if (memoryId) { memRecord(memoryId, toRecord); }
+  lastSymPlayedTime = millis(); 
 }
 
 
@@ -374,13 +378,9 @@ void playChar(const char oneChar, int transmit) {
   for (unsigned int j = 0; j < 8; j++) {
       int bit = morse_ascii[(int)oneChar] & (0x80 >> j);
       if (inchar) {
-          if (bit)
-            playSym(symDah, transmit, NO_REC, 0);
-          else
-            playSym(symDit, transmit, NO_REC, 0);
-      } else if (bit) {
-          inchar = 1;
-      }
+          if (bit) { playSym(symDah, transmit, NO_REC, 0); }
+          else { playSym(symDit, transmit, NO_REC, 0); }
+      } else if (bit) { inchar = 1; }
   }
   delay(ditMillis * 2);
 }
@@ -389,10 +389,8 @@ void playChar(const char oneChar, int transmit) {
 void playStr(const char *oneString, int transmit) {
 
   for (unsigned int j = 0; j < strlen(oneString); j++) {
-    if (oneString[j] == ' ')
-      delay(ditMillis * 7);
-    else
-      playChar(oneString[j], transmit);
+    if (oneString[j] == ' ') { delay(ditMillis * 7); }
+    else { playChar(oneString[j], transmit); }
   }
 }
 
@@ -441,14 +439,14 @@ void setMemory(int memoryId, int pin, int inverted) {
         double spaceDuration = (millis() - lastSymPlayedTime) / (ditMillis / 3);
         spaceDuration += 2.5;
         int toRecord = spaceDuration;
-        if (toRecord > 255) toRecord = 255;
+        if (toRecord > 255) { toRecord = 255; }
         memRecord(memoryId, toRecord);
       }
     }
 
     processPaddles(ditPressed, dahPressed, SPKR, memoryId);
 
-    if (memorySize[memoryId] >= sizeof(memory[memoryId])-2) break; // protect against overflow
+    if (memorySize[memoryId] >= sizeof(memory[memoryId])-2) { break; } // protect against overflow
 
     if (digitalRead(pinSetup) == (inverted ? HIGH : LOW)) {
       delay(50);
@@ -495,23 +493,26 @@ void playMemory(int memoryId) {
   toSend = 0;
   toChar = 0;
   toLength = 0;
+  int cmd = 0;
 
+  for (size_t i=0; i <= memorySize[memoryId]; i++) {
 
-  for (size_t i=0; i < memorySize[memoryId]; i++) {
-    int cmd = memory[memoryId][i];
+    if (i == memorySize[memoryId]) { cmd = 5; }
+    else { cmd = memory[memoryId][i]; }
+
     DEBUG_PRINT("cmd: ");
     DEBUG_PRINTLN(cmd);
-    if (cmd == 0 || cmd == 1)
-    {
+    if (cmd == 0 || cmd == 1) {
       int ret = playSymInterruptableVec(cmd+1, TX, pins, conditions, 2);
       if (ret != -1) {
-//        delay(10);
         waitPin(ret, HIGH);
         return;
       }
-    } else if (cmd > 4) {
+    } else if (cmd > 4)   {
       toChar = toChar << (16 - (toLength * 2));
       toSend = (toLength << 16) + toChar;
+      DEBUG_PRINT("Duration sent: ");
+      DEBUG_PRINTLN(duration);
       sendPacket(toSend, duration);
       lastPacketType = udpFrame;
       toSend = 0;
@@ -522,6 +523,8 @@ void playMemory(int memoryId) {
       PINHIGH(D1);
       delay(duration);
       duration += 100;
+      DEBUG_PRINT("Duration calced: ");
+      DEBUG_PRINTLN(duration);
       PINLOW(D1);
     }
   }
@@ -531,7 +534,6 @@ void playMemory(int memoryId) {
 void checkMemoryPin(int memoryId, int pin, int inverted) {
   if (readAnalog() == pin) {
     unsigned long whenStartedPress = millis();
-
     int doingSet = 0;
       
     delay(5);
@@ -554,8 +556,8 @@ void checkMemoryPin(int memoryId, int pin, int inverted) {
     digitalWrite(pinStatusLed, LOW);
     delay(50);
 
-    if (doingSet) setMemory(memoryId, pin, inverted);
-    else playMemory(memoryId);
+    if (doingSet) { setMemory(memoryId, pin, inverted); }
+    else { playMemory(memoryId); }
   }
 }
 
@@ -565,16 +567,16 @@ void checkMemoryPin(int memoryId, int pin, int inverted) {
 
 int scaleDown(int orig, double factor, int lowerLimit) {
   int scaled = (int)((double)orig * factor);
-  if (scaled == orig) scaled--;
-  if (scaled < lowerLimit) scaled = lowerLimit;
+  if (scaled == orig) { scaled--; }
+  if (scaled < lowerLimit) { scaled = lowerLimit; }
   return scaled;
 }
 
 
 int scaleUp(int orig, double factor, int upperLimit) {
   int scaled = (int)((double)orig * factor);
-  if (scaled == orig) scaled++;
-  if (scaled > upperLimit) scaled = upperLimit;
+  if (scaled == orig) { scaled++; }
+  if (scaled > upperLimit) { scaled = upperLimit; }
   return scaled;
 }
 
@@ -602,7 +604,7 @@ void loadStorage() {
   // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
   int resetRequested = (digitalRead(pinKeyDit) == LOW) && (digitalRead(pinKeyDah) == LOW);
 
-  if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) factoryReset();
+  if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) { factoryReset(); }
 
   currStorageOffset = 2;
   
@@ -624,9 +626,9 @@ void loadStorage() {
       currKeyerMode = keyerModeStraight;
     } else if (packetType >= packetTypeMem0 && packetType <= packetTypeMem2) {
       int memoryId = 0;
-      if (packetType == packetTypeMem0) memoryId = 0;
-      if (packetType == packetTypeMem1) memoryId = 1;
-      if (packetType == packetTypeMem2) memoryId = 2;
+      if (packetType == packetTypeMem0) { memoryId = 0; }
+      if (packetType == packetTypeMem1) { memoryId = 1; }
+      if (packetType == packetTypeMem2) { memoryId = 2; }
       memorySize[memoryId] = (EEPROM.read(currStorageOffset+1) << 8) | EEPROM.read(currStorageOffset+2);
       for (size_t i = 0; i < memorySize[memoryId]; i++) {
         memory[memoryId][i] = EEPROM.read(currStorageOffset + 3 + i);
@@ -679,14 +681,10 @@ void setup() {
     DEBUG_PRINTLN(WiFi.localIP());
   }
   if (netMode) {
-    if (udp.begin(port) == 0)
-      playStr("NO PORT", SPKR);
-    else if (netMode == netClient) 
-        playChar('C', SPKR);
-      else
-        playChar('S', SPKR);
-  } else     
-playChar('R', SPKR);
+    if (udp.begin(port) == 0) { playStr("NO PORT", SPKR); }
+    else if (netMode == netClient) { playChar('C', SPKR); }
+         else { playChar('S', SPKR); }
+  } else { playChar('R', SPKR); }
 }
 
 
@@ -709,6 +707,8 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   PINLOW(D3);
   delay(50);
   lastPacketSentTime = millis();
+  DEBUG_PRINT("Packet Sent: ");
+  DEBUG_PRINTLN(packetCount);
 }
 
 
@@ -725,7 +725,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
   if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
     if (prevSymbol == symDah) { playSym(symDit, transmit, memoryId, 0); }
     else playSym(symDah, transmit, memoryId, 1);
-    if (iambicModeB) playAlternate = 1;
+    if (iambicModeB) { playAlternate = 1; }
   } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
     if (currKeyerMode == keyerModeIambic) {
       playSym(symDah, transmit, memoryId, 1);
@@ -733,13 +733,13 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
       playStraightKey(pinKeyDah);
     }
   } else if (ditPressed) {                                              // Dit paddle
-    if (prevSymbol == symDit) ditDetected = 0;
-    if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
+    if (prevSymbol == symDit) { ditDetected = 0; }
+    if (currKeyerMode == keyerModeStraight) { playStraightKey(pinKeyDit); }
     else { playSym(symDit, transmit, memoryId, 0); }
   } else {                                                              // No Paddle
     if (playAlternate) {
       if (prevSymbol == symDah) { playSym(symDit, transmit, memoryId, 0); }
-      else playSym(symDah, transmit, memoryId, 1);
+      else { playSym(symDah, transmit, memoryId, 1); }
       playAlternate = 0;
     }
     if (toChar && (netMode == netClient) && (millis() - lastSymPlayedTime > ditMillis)) {
@@ -770,11 +770,15 @@ void playPacket(DataPacket packet) {
   int spacing = (int)(packet.number >> 16);
   DEBUG_PRINT("spacing: ");
   DEBUG_PRINTLN(spacing);
-  // uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
+#ifdef DEBUG
+  uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
+#endif
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
  
   int alreadyPassed = (int) (millis() - lastSymPlayedTime) - ditMillis;
+  DEBUG_PRINT("Packet recd: ");
+  DEBUG_PRINTLN(packetNumber);
   DEBUG_PRINT("alreadypassed: ");
   DEBUG_PRINTLN(alreadyPassed);
   if (spacing > alreadyPassed) {
@@ -916,17 +920,17 @@ void loop() {
       waitPin(pinSetup, HIGH);
       return;
     }
-    if (ditPressed) ditMillis = scaleDown(ditMillis, 1/1.05, 20);
-    if (dahPressed) ditMillis = scaleUp(ditMillis, 1.05, 800);
-    if (ditPressed || dahPressed) playSpeed();
+    if (ditPressed) { ditMillis = scaleDown(ditMillis, 1/1.05, 20); }
+    if (dahPressed) { ditMillis = scaleUp(ditMillis, 1.05, 800); }
+    if (ditPressed || dahPressed) { playSpeed(); }
   } else if (currState == stateSettingTone) {
     if (playSymInterruptable(symDit, 0, pinSetup, LOW) != -1) {
       currState = stateIdle;
       waitPin(pinSetup, HIGH);
       return;
     }
-    if (ditPressed) toneFreq = scaleDown(toneFreq, 1/1.1, 30);
-    if (dahPressed) toneFreq = scaleUp(toneFreq, 1.1, 12500);
+    if (ditPressed) { toneFreq = scaleDown(toneFreq, 1/1.1, 30); }
+    if (dahPressed) { toneFreq = scaleUp(toneFreq, 1.1, 12500); }
     saveStorageInt(packetTypeFreq, toneFreq);
   }
 }
