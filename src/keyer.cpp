@@ -24,6 +24,7 @@
 // 2022-05-25 - Create processPaddles(), use it for both main loop and memory recording.
 // 2022-05-26 - Add CW player, network init code (TODO: get network code working.)
 // 2022-06-07 - Finalize basic network code, add ring buffer, tighten timimgs.
+// 2022-06-12 - Fix memory and network playback timings.
 
 
 #include <Arduino.h>
@@ -31,10 +32,11 @@
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <CircularBuffer.h>
+
+#define DEBUG_PIN
+// #define DEBUG
+
 #include <Pinflip.h>
-
-#define DEBUG
-
 #include <Debug.h>
 
 #define SPKR 0
@@ -350,9 +352,7 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 void playSym(int sym, int transmit, int memoryId, int toRecord) {
 
   unsigned int newGap = millis() - lastSymPlayedTime;
-  if (newGap > 5)
-    gap = newGap + ditMillis;
-
+  if (newGap > 5) { gap = newGap + ditMillis; }
   playSymInterruptableVec(sym, transmit, NULL, NULL, 0);
   if (memoryId) memRecord(memoryId, toRecord);
   lastSymPlayedTime = millis();
@@ -425,33 +425,28 @@ void setMemory(int memoryId, int pin, int inverted) {
   playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
 //  digitalWrite(pinStatusLed, HIGH);
-  recording = 1;
-
-  unsigned long spaceStarted = 0;
+  recording = 2;
   
   while(1) {
     delay(0);
     int ditPressed = (digitalRead(pinKeyDit) == LOW);
     int dahPressed = (digitalRead(pinKeyDah) == LOW);
 
-    if ((ditPressed || dahPressed) && spaceStarted) {
-      // record a space
-      double spaceDuration = millis() - spaceStarted;
-      DEBUG_PRINTLN_DOUBLE(spaceDuration, 2);
-      spaceDuration /= (ditMillis / 3);
-      spaceDuration += 2.5;
-      int toRecord = spaceDuration;
-      if (toRecord > 255) toRecord = 255;
-      memRecord(memoryId, toRecord);
-      spaceStarted = 0;
+    if ((ditPressed || dahPressed) && (millis() - lastSymPlayedTime > ditMillis)) {
+      // record a space;
+
+      if (recording == 2) {
+        recording = 1;
+      } else {
+        double spaceDuration = (millis() - lastSymPlayedTime) / (ditMillis / 3);
+        spaceDuration += 2.5;
+        int toRecord = spaceDuration;
+        if (toRecord > 255) toRecord = 255;
+        memRecord(memoryId, toRecord);
+      }
     }
 
     processPaddles(ditPressed, dahPressed, SPKR, memoryId);
-
-    if (prevSymbol) {
-      spaceStarted = millis();
-      prevSymbol = 0;
-    }
 
     if (memorySize[memoryId] >= sizeof(memory[memoryId])-2) break; // protect against overflow
 
@@ -496,27 +491,18 @@ void playMemory(int memoryId) {
 
   int pins[2] = { pinKeyDit, pinKeyDah };
   int conditions[2] = { LOW, LOW };
-  int newChar = 0;
+  int duration = 0;
   toSend = 0;
   toChar = 0;
   toLength = 0;
 
+
   for (size_t i=0; i < memorySize[memoryId]; i++) {
     int cmd = memory[memoryId][i];
+    DEBUG_PRINT("cmd: ");
     DEBUG_PRINTLN(cmd);
     if (cmd == 0 || cmd == 1)
     {
-      if (newChar) {
-        toChar = toChar << (16 - (toLength * 2));
-        toSend = (toLength << 16) + toChar;
-        sendPacket(toSend, gap);
-        lastPacketType = udpFrame;
-        toSend = 0;
-        toChar = 0;
-        toLength = 0;
-        newChar = 0;
-      }
-      DEBUG_PRINTLN();
       int ret = playSymInterruptableVec(cmd+1, TX, pins, conditions, 2);
       if (ret != -1) {
 //        delay(10);
@@ -524,12 +510,19 @@ void playMemory(int memoryId) {
         return;
       }
     } else if (cmd > 4) {
-      int duration = cmd - 2;
+      toChar = toChar << (16 - (toLength * 2));
+      toSend = (toLength << 16) + toChar;
+      sendPacket(toSend, duration);
+      lastPacketType = udpFrame;
+      toSend = 0;
+      toChar = 0;
+      toLength = 0;
+      duration = cmd - 4;
       duration *= (ditMillis / 3);
+      PINHIGH(D1);
       delay(duration);
-      gap = duration;
-      newChar = 1;
-      DEBUG_PRINTLN(gap);
+      duration += 100;
+      PINLOW(D1);
     }
   }
 }
@@ -711,9 +704,7 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   delay(0);
   udp.write(frame, sizeof(packet));
   delay(0);
-  PINHIGH(D2);
   udp.endPacket();
-  PINLOW(D2);
   delay(50);
   lastPacketSentTime = millis();
 }
@@ -724,29 +715,29 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
   if (ditDetected) {
-    playSym(symDit, TX, memoryId, 0);
+    playSym(symDit, transmit, memoryId, 0);
     ditDetected = 0;
     playAlternate = 0;
     ditPressed = 0;
   }
   if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
-    if (prevSymbol == symDah) { playSym(symDit, TX, memoryId, 0); }
-    else playSym(symDah, TX, memoryId, 1);
+    if (prevSymbol == symDah) { playSym(symDit, transmit, memoryId, 0); }
+    else playSym(symDah, transmit, memoryId, 1);
     if (iambicModeB) playAlternate = 1;
   } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
     if (currKeyerMode == keyerModeIambic) {
-      playSym(symDah, TX, memoryId, 1);
+      playSym(symDah, transmit, memoryId, 1);
     } else if (currKeyerMode == keyerModeVibroplex) {
       playStraightKey(pinKeyDah);
     }
   } else if (ditPressed) {                                              // Dit paddle
     if (prevSymbol == symDit) ditDetected = 0;
     if (currKeyerMode == keyerModeStraight) playStraightKey(pinKeyDit);
-    else { playSym(symDit, TX, memoryId, 0); }
+    else { playSym(symDit, transmit, memoryId, 0); }
   } else {                                                              // No Paddle
     if (playAlternate) {
-      if (prevSymbol == symDah) { playSym(symDit, TX, memoryId, 0); }
-      else playSym(symDah, TX, memoryId, 1);
+      if (prevSymbol == symDah) { playSym(symDit, transmit, memoryId, 0); }
+      else playSym(symDah, transmit, memoryId, 1);
       playAlternate = 0;
     }
     if (toChar && (netMode == netClient) && (millis() - lastSymPlayedTime > ditMillis)) {
@@ -765,19 +756,25 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 
 void playPacket(DataPacket packet) {
 
-//  PINHIGH(D1);
   int spacing = (int)(packet.number >> 16);
+  DEBUG_PRINT("spacing: ");
+  DEBUG_PRINTLN(spacing);
   // uint16_t packetNumber = (uint16_t) (packet.number & 0xFFFF);
   uint16_t frameLength = (uint16_t) (packet.data >> 16);
   uint16_t frame = (uint16_t) packet.data;
  
   int alreadyPassed = (int) (millis() - lastSymPlayedTime) - ditMillis;
+  DEBUG_PRINT("alreadypassed: ");
+  DEBUG_PRINTLN(alreadyPassed);
   if (spacing > alreadyPassed) {
     int waitTime = spacing - alreadyPassed - (ditMillis * 2);
-    if (waitTime > 10) 
-      delay(waitTime);
+    if (waitTime > 10) { 
+      PINHIGH(D2);
+      delay(waitTime); }
+      PINLOW(D2);
+      DEBUG_PRINT("waittime: ");
+      DEBUG_PRINTLN(waitTime);
   }
-//  PINLOW(D1);
   for (int x = 0; x < frameLength; x++) {
     unsigned int roll = (frame & 0xC000) >> 14;
     frame = frame << 2;
@@ -818,9 +815,7 @@ void loop() {
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
-      PINHIGH(D3);
       udp.read(frame, 10);
-      PINLOW(D3);
       memcpy(&packet, frame, sizeof(packet));
       parsePacket(packet);
     }
