@@ -4,19 +4,21 @@
 // Modified by ea4hew 15/09/2020
 // Modified by K1BR 05/21/2022
 
-// Functioning:
+// Basic Functions:
 // Press the Setup button, enter the speed configuration mode, change the speed with the paddles, to exit press the Setup button again.
-// LONG press Setup button, enters advanced configuration mode, several things can be changed:
+// LONG press Setup button, enters tone configuration mode, change tone with the paddles, to exit press the Setup button again.
 
-// Long press on one of the memories to record memory, press again and it is memorized.
+// Long press on one of the memories to record memory, press Setup button when finished and it is memorized.
 // Short press on one of the memories to play that memory.
 
-// 1: The tone is changed with the paddles.
-// 2: Switch to paddle handler by pressing Memory1.
-// 3: Switch to staright key by pressing Memory2.
-// 4: Switch to vibroplex by pressing Memory3.
-// To exit the advanced configuration, press the Setup button.
+// Press the Setup button and hold while immediately pressing a memory button:
+// 1: Switch to paddle handler by pressing Memory1.
+// 2: Switch to staright key by pressing Memory2.
+// 3: Switch to vibroplex by pressing Memory3.
 
+// Notes on networking:
+// There is a 2 char delay on the server side to allow buffering. Inter-character timimg is preserved.
+// Networking only functions in iambic mode.
 
 // 2022-05-22 - Translate comments and configure for Platformio. Add inital Iambic Mode B code.
 // 2022-05-23 - Move memory switches to A0.
@@ -25,10 +27,11 @@
 // 2022-05-26 - Add CW player, network init code (TODO: get network code working.)
 // 2022-06-07 - Finalize basic network code, add ring buffer, tighten timimgs.
 // 2022-06-12 - Fix memory and network playback timings.
+// 2022-06-14 - Add EEPROM-rotate library, fix paddle debounce.
 
 
 #include <Arduino.h>
-#include <EEPROM.h>
+#include <EEPROM_rotate.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <CircularBuffer.h>
@@ -155,6 +158,8 @@ int iambicModeB = 1;                    // Default iambic mode
 char memory[3][600];
 size_t memorySize[3];
 
+EEPROM_Rotate EEPROMr;
+
 const char* ssid = "***REMOVED***";
 const char* password =  "***REMOVED***";
  
@@ -231,7 +236,7 @@ void playStraightKey(int releasePin) {
 }
 
 
-// EEPROM FUNCTIONS
+// EEPROMr FUNCTIONS
 
 void saveStorageEmptyPacket(int type) {
   if (currStorageOffset + 1 >= storageSize) {
@@ -239,9 +244,9 @@ void saveStorageEmptyPacket(int type) {
     return;
   }
 
-  EEPROM.write(currStorageOffset++, type);
-  EEPROM.write(currStorageOffset, packetTypeEnd);
-  EEPROM.commit();
+  EEPROMr.write(currStorageOffset++, type);
+  EEPROMr.write(currStorageOffset, packetTypeEnd);
+  EEPROMr.commit();
 }
 
 
@@ -250,11 +255,11 @@ void saveStorageInt(int type, int value) {
     dumpSettingsToStorage();
     return;
   }
-  EEPROM.write(currStorageOffset++, type);
-  EEPROM.write(currStorageOffset++, (value >> 8) & 0xFF);
-  EEPROM.write(currStorageOffset++, value & 0xFF);
-  EEPROM.write(currStorageOffset, packetTypeEnd);
-  EEPROM.commit();
+  EEPROMr.write(currStorageOffset++, type);
+  EEPROMr.write(currStorageOffset++, (value >> 8) & 0xFF);
+  EEPROMr.write(currStorageOffset++, value & 0xFF);
+  EEPROMr.write(currStorageOffset, packetTypeEnd);
+  EEPROMr.commit();
 }
 
 
@@ -269,14 +274,14 @@ void saveStorageMemory(int memoryId) {
   else if (memoryId == 1) { type = packetTypeMem1; }
   else if (memoryId == 2) { type = packetTypeMem2; }
 
-  EEPROM.write(currStorageOffset++, type);
-  EEPROM.write(currStorageOffset++, (memorySize[memoryId] >> 8) & 0xFF);
-  EEPROM.write(currStorageOffset++, memorySize[memoryId] & 0xFF);
+  EEPROMr.write(currStorageOffset++, type);
+  EEPROMr.write(currStorageOffset++, (memorySize[memoryId] >> 8) & 0xFF);
+  EEPROMr.write(currStorageOffset++, memorySize[memoryId] & 0xFF);
 
-  for (size_t i=0; i<memorySize[memoryId]; i++) EEPROM.write(currStorageOffset++, memory[memoryId][i]);
+  for (size_t i=0; i<memorySize[memoryId]; i++) EEPROMr.write(currStorageOffset++, memory[memoryId][i]);
   
-  EEPROM.write(currStorageOffset, packetTypeEnd);
-  EEPROM.commit();
+  EEPROMr.write(currStorageOffset, packetTypeEnd);
+  EEPROMr.commit();
 }
 
 
@@ -429,6 +434,9 @@ void setMemory(int memoryId, int pin, int inverted) {
     delay(0);
     int ditPressed = (digitalRead(pinKeyDit) == LOW);
     int dahPressed = (digitalRead(pinKeyDah) == LOW);
+    delay(3);
+    ditPressed = ditPressed & (digitalRead(pinKeyDit) == LOW);
+    dahPressed = dahPressed & (digitalRead(pinKeyDah) == LOW);
 
     if ((ditPressed || dahPressed) && (millis() - lastSymPlayedTime > ditMillis)) {
       // record a space;
@@ -520,12 +528,10 @@ void playMemory(int memoryId) {
       toLength = 0;
       duration = cmd - 4;
       duration *= (ditMillis / 3);
-      PINHIGH(D1);
       delay(duration);
       duration += 100;
       DEBUG_PRINT("Duration calced: ");
       DEBUG_PRINTLN(duration);
-      PINLOW(D1);
     }
   }
 }
@@ -584,9 +590,9 @@ int scaleUp(int orig, double factor, int upperLimit) {
 // INITIALIZATION FUNCTIONS
 
 void factoryReset() {
-  if (EEPROM.read(0) != storageMagic1) EEPROM.write(0, storageMagic1);
-  if (EEPROM.read(1) != storageMagic2) EEPROM.write(1, storageMagic2);
-  if (EEPROM.read(2) != packetTypeEnd) EEPROM.write(2, packetTypeEnd);
+  if (EEPROMr.read(0) != storageMagic1) EEPROMr.write(0, storageMagic1);
+  if (EEPROMr.read(1) != storageMagic2) EEPROMr.write(1, storageMagic2);
+  if (EEPROMr.read(2) != packetTypeEnd) EEPROMr.write(2, packetTypeEnd);
 
   currStorageOffset = 2;
 
@@ -604,19 +610,19 @@ void loadStorage() {
   // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
   int resetRequested = (digitalRead(pinKeyDit) == LOW) && (digitalRead(pinKeyDah) == LOW);
 
-  if (resetRequested || EEPROM.read(0) != storageMagic1 || EEPROM.read(1) != storageMagic2) { factoryReset(); }
+  if (resetRequested || EEPROMr.read(0) != storageMagic1 || EEPROMr.read(1) != storageMagic2) { factoryReset(); }
 
   currStorageOffset = 2;
   
   while (1) {
-    int packetType = EEPROM.read(currStorageOffset);
+    int packetType = EEPROMr.read(currStorageOffset);
     if (packetType == packetTypeEnd) {
       break;
     } else if (packetType == packetTypeSpeed) {
-      ditMillis = (EEPROM.read(currStorageOffset+1) << 8) | EEPROM.read(currStorageOffset+2);
+      ditMillis = (EEPROMr.read(currStorageOffset+1) << 8) | EEPROMr.read(currStorageOffset+2);
       currStorageOffset += 2;
     } else if (packetType == packetTypeFreq) {
-      toneFreq = (EEPROM.read(currStorageOffset+1) << 8) | EEPROM.read(currStorageOffset+2);
+      toneFreq = (EEPROMr.read(currStorageOffset+1) << 8) | EEPROMr.read(currStorageOffset+2);
       currStorageOffset += 2;
     } else if (packetType == packetTypeKeyerModeIambic) {
       currKeyerMode = keyerModeIambic;
@@ -629,9 +635,9 @@ void loadStorage() {
       if (packetType == packetTypeMem0) { memoryId = 0; }
       if (packetType == packetTypeMem1) { memoryId = 1; }
       if (packetType == packetTypeMem2) { memoryId = 2; }
-      memorySize[memoryId] = (EEPROM.read(currStorageOffset+1) << 8) | EEPROM.read(currStorageOffset+2);
+      memorySize[memoryId] = (EEPROMr.read(currStorageOffset+1) << 8) | EEPROMr.read(currStorageOffset+2);
       for (size_t i = 0; i < memorySize[memoryId]; i++) {
-        memory[memoryId][i] = EEPROM.read(currStorageOffset + 3 + i);
+        memory[memoryId][i] = EEPROMr.read(currStorageOffset + 3 + i);
       }
       currStorageOffset += 2 + memorySize[memoryId];
     }
@@ -657,7 +663,8 @@ void setup() {
   pinMode(pinStatusLed, OUTPUT);
   pinMode(pinMosfet, OUTPUT);
   pinMode(pinSpeaker, OUTPUT);
-  EEPROM. begin(1024);
+  EEPROMr.size(4);
+  EEPROMr.begin(1024);
   loadStorage();
 
   playSpeed();
@@ -702,9 +709,7 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
   delay(0);
   udp.write(frame, sizeof(packet));
   delay(0);
-  PINHIGH(D3);
   udp.endPacket();
-  PINLOW(D3);
   delay(50);
   lastPacketSentTime = millis();
   DEBUG_PRINT("Packet Sent: ");
@@ -784,9 +789,7 @@ void playPacket(DataPacket packet) {
   if (spacing > alreadyPassed) {
     int waitTime = spacing - alreadyPassed - (ditMillis * 2);
     if (waitTime > 10) { 
-      PINHIGH(D2);
       delay(waitTime); }
-      PINLOW(D2);
       DEBUG_PRINT("waittime: ");
       DEBUG_PRINTLN(waitTime);
   }
@@ -826,6 +829,9 @@ void loop() {
 
   int ditPressed = (digitalRead(pinKeyDit) == LOW);
   int dahPressed = (digitalRead(pinKeyDah) == LOW);
+  delay(3);
+  ditPressed = ditPressed & (digitalRead(pinKeyDit) == LOW);
+  dahPressed = dahPressed & (digitalRead(pinKeyDah) == LOW);
 
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
