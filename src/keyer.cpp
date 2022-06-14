@@ -339,7 +339,7 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 //  digitalWrite(pinStatusLed, recording ? HIGH : LOW);
   digitalWrite(pinMosfet, LOW);
 
-  if ((netMode == netClient) && transmit) {
+  if ((netMode == netClient) && transmit && (currKeyerMode == keyerModeIambic)) {
     toChar = (toChar << 2) + sym;
     toLength++;
   }
@@ -867,12 +867,12 @@ void loop() {
         if (millis() > whenStartedPress + 1000) {
 //          digitalWrite(pinStatusLed, HIGH);
           nextState = stateSettingTone;
+          playStr("TONE", SPKR);
         }
         A0_switch = readAnalog();
         // While in speed set mode we press Memory1, it changes to paddle keyer
         if (A0_switch == 1) {
-          playSym(symDit, SPKR, NO_REC, 0);
-          playSym(symDit, SPKR, NO_REC, 0);
+          playChar('I', SPKR);
           currKeyerMode = keyerModeIambic;
           saveStorageEmptyPacket(packetTypeKeyerModeIambic);
           waitPin(pinSetup, HIGH);
@@ -881,9 +881,7 @@ void loop() {
         }
         // While in speed set mode we press Memory2, it changes to straight key
         if (A0_switch == 2) {
-          playSym(symDit, SPKR, NO_REC, 0);
-          playSym(symDit, SPKR, NO_REC, 0);
-          playSym(symDit, SPKR, NO_REC, 0);
+          playChar('S', SPKR);
           currKeyerMode = keyerModeStraight;
           saveStorageEmptyPacket(packetTypeKeyerModeStraight);
           waitPin(pinSetup, HIGH);
@@ -892,10 +890,7 @@ void loop() {
         }
         // While in speed set mode we press Memory3, it changes to Vibroplex
         if (A0_switch == 3) {
-          playSym(symDit, SPKR, NO_REC, 0);
-          playSym(symDit, SPKR, NO_REC, 0);
-          playSym(symDit, SPKR, NO_REC, 0);
-          playSym(symDah, SPKR, NO_REC, 0);
+          playChar('V', SPKR);
           currKeyerMode = keyerModeVibroplex;
           saveStorageEmptyPacket(packetTypeKeyerModeVibroplex);
           waitPin(pinSetup, HIGH);
