@@ -172,14 +172,8 @@ size_t memorySize[3];
 
 EEPROM_Rotate EEPROMr;
 
-// ** NETWORK CONFIGURATION ** //
- 
-const char* ssid = "***REMOVED***";
-const char* password =  "***REMOVED***";
- 
-const unsigned int port = 4120;
-const char * host = "192.168.1.132";
-// const char * host = "192.168.1.124";
+// See the Network.h file in the include subdirectory to configure the network.
+#include <Network.h>
 
 WiFiUDP udp;
 struct DataPacket {

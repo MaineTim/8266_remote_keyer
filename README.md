@@ -52,7 +52,7 @@ If you try the code, I'd love to hear how it goes. When you find bugs, please re
 
 ## Basic Functions:
 
-Set up the network parameters found in the section of the code marked "NETWORK CONFIGURATION".
+Set up the network parameters found in the file include/Network.h.
 Burn your ESPs.
 
 When the code boots up, it announces the current speed. Then it attempts to connect to the
