@@ -43,7 +43,7 @@
 
 
 #include <Arduino.h>
-#include <EEPROM_rotate.h>
+#include <EEPROM_Rotate.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
 #include <CircularBuffer.h>

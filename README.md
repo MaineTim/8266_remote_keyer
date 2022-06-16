@@ -73,3 +73,5 @@ Press the Setup button and hold it while immediately pressing a memory button to
  1: Switch to paddle handler by pressing Memory1.
  2: Switch to staright key by pressing Memory2.
  3: Switch to vibroplex by pressing Memory3.
+
+![breadboard image] (./keyer_bb.png)
