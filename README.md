@@ -40,7 +40,7 @@ The remote functionality only works in iambic keyer mode.
 The network packets support characters of up to 8 elements, which is fine unless you are sending long strings of dits or dahs. If you do, the code will pause and send a packet for each 8 elements, which will cause a slight pause in the sidetone.
 The code is configured to be compiled with PlatformIO under VS Code, and has not been tested with other platforms/IDEs. The networking is hard-wired in, and depends on #defines.
 
-# What's next.
+## What's next.
 
 The first thing that will be changed is to allow selection of network function to be done by keypress at boot-up (currently #defined in code).
 Iambic mode B is currently the hardcoded selection, and that needs to be changed to allow push-button configuration.
@@ -70,8 +70,8 @@ Short press on one of the memories to play that memory.
 
 Press the Setup button and hold it while immediately pressing a memory button to select the keyer mode:
 
- 1: Switch to paddle handler by pressing Memory1.
- 2: Switch to staright key by pressing Memory2.
- 3: Switch to vibroplex by pressing Memory3.
+- Switch to paddle handler by pressing Memory1.  
+- Switch to staright key by pressing Memory2.  
+- Switch to vibroplex by pressing Memory3.  
 
 ![breadboard image](keyer_bb.png)
