@@ -1,0 +1,6 @@
+[submodule "lib/eeprom_rotate"]
+	path = lib/eeprom_rotate
+	url = https://github.com/MaineTim/eeprom_rotate.git
+[submodule "lib/CircularBuffer"]
+	path = lib/CircularBuffer
+	url = https://github.com/MaineTim/CircularBuffer.git

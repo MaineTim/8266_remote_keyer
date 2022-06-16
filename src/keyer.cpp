@@ -39,6 +39,7 @@
 // 2022-06-07 - Finalize basic network code, add ring buffer, tighten timimgs.
 // 2022-06-12 - Fix memory and network playback timings.
 // 2022-06-14 - Add EEPROM-rotate library, fix paddle debounce, add speed annoucements.
+// 2022-06-16 - Update eeprom rotation reserved memory.
 
 
 #include <Arduino.h>
@@ -171,6 +172,8 @@ size_t memorySize[3];
 
 EEPROM_Rotate EEPROMr;
 
+// ** NETWORK CONFIGURATION ** //
+ 
 const char* ssid = "***REMOVED***";
 const char* password =  "***REMOVED***";
  
