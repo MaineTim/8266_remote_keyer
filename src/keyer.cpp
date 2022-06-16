@@ -163,7 +163,7 @@ const int storageMagic2 = 97;
 // CONFIG DEFAULTS
 
 int toneFreq = 700;                     // Default sidetone frequncy
-unsigned int ditMillis = 60;                     // Default speed
+unsigned int ditMillis = 60;            // Default speed (20 WPM)
 int currKeyerMode = keyerModeIambic;    // Default mode
 int iambicModeB = 1;                    // Default iambic mode
 
@@ -187,23 +187,23 @@ CircularBuffer < DataPacket, 10> packets;
 // RUN STATE
 
 int currState = stateIdle;
-int prevSymbol = 0; // 0=none, 1=dit, 2=dah
-int recording = 0;
-int currStorageOffset = 3;
-int playAlternate = 0;                  // Mode B completion flag
-int ditDetected = 0;                    // Dit paddle hit during Dah play
-int memSwitch = 0;                      // Memory switch set by readAnalog()
+int prevSymbol = 0;                       // 0=none, 1=dit, 2=dah
+int recording = 0;                        // Recording a memory
+int currStorageOffset = 3;                // Base offset for the EEPROM memory block is 3
+int playAlternate = 0;                    // Mode B completion flag
+int ditDetected = 0;                      // Dit paddle hit during Dah play
+int memSwitch = 0;                        // Memory switch set by readAnalog()
 int netMode = netDisconnected;
-unsigned long lastPacketSentTime = 0;
-unsigned long keepAliveTimer = 0;
-unsigned long lastSymPlayedTime = 0;
-unsigned long gap = 0;
+unsigned long lastPacketSentTime = 0;     // in milli time
+unsigned long keepAliveTimer = 0;         // in millis
+unsigned long lastSymPlayedTime = 0;      // in milli time
+unsigned long gap = 0;                    // gap from last packet sent to start of next char in millis
 uint16_t packetCount = 0;
-unsigned int toSend = 0;
-uint16_t toChar = 0;
-uint16_t toLength = 0;
-int lastPacketType = 0;
-int playNextPacket = 0;
+unsigned int toSend = 0;                  // stage to assemble the data portion of packet
+uint16_t toChar = 0;                      // holds in bit pattern to be sent
+uint16_t toLength = 0;                    // number of elements to  the character
+int lastPacketType = 0;                   // what was last sent
+int playNextPacket = 0;                   // buffer flag
 
 
 DataPacket packet;
@@ -246,6 +246,7 @@ void playStraightKey(int releasePin) {
 
 // EEPROMr FUNCTIONS
 
+// Mark the end of a memory.
 void saveStorageEmptyPacket(int type) {
   if (currStorageOffset + 1 >= storageSize) {
     dumpSettingsToStorage();
@@ -258,6 +259,7 @@ void saveStorageEmptyPacket(int type) {
 }
 
 
+// Store an int in memory.
 void saveStorageInt(int type, int value) {
   if (currStorageOffset + 1 + 2 >= storageSize) {
     dumpSettingsToStorage();
@@ -271,6 +273,7 @@ void saveStorageInt(int type, int value) {
 }
 
 
+// Save recorded chars to a memory.
 void saveStorageMemory(int memoryId) {
   if (currStorageOffset + 1 + 2 + memorySize[memoryId] >= storageSize) {
     dumpSettingsToStorage();
@@ -308,7 +311,7 @@ void dumpSettingsToStorage() {
 // SYMBOL GENERATION
 
 // Delay that checks for dot insertion and optionally can be interrupted
-// by a pin meeting a condition.
+// by a pin meeting a condition. Return that pin.
 int delayInterruptable(int ms, int *pins, const int *conditions, size_t numPins) {
   unsigned long finish = millis() + ms;
 
@@ -325,6 +328,7 @@ int delayInterruptable(int ms, int *pins, const int *conditions, size_t numPins)
 }
 
 
+// Wait for pin to change state.
 void waitPin(int pin, int condition) {
   int pins[1] = { pin };
   int conditions[1] = { condition };
@@ -333,6 +337,8 @@ void waitPin(int pin, int condition) {
 }
 
 
+// Play a symbol but watch for changed state in pin(s).
+// Add char to packet for network.
 int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, size_t numPins) {
 
   unsigned int newGap = millis() - lastSymPlayedTime;
@@ -342,14 +348,12 @@ int playSymInterruptableVec(int sym, int transmit, int *pins, int *conditions, s
 
   tone(pinSpeaker, toneFreq);
   digitalWrite(pinStatusLed, HIGH);
-//  digitalWrite(pinStatusLed, recording ? LOW : HIGH);
   if (transmit) { digitalWrite(pinMosfet, HIGH); }
   
   int ret = delayInterruptable(ditMillis * (sym == symDit ? 1 : 3), pins, conditions, numPins);
 
   noTone(pinSpeaker);
   digitalWrite(pinStatusLed, LOW);
-//  digitalWrite(pinStatusLed, recording ? HIGH : LOW);
   digitalWrite(pinMosfet, LOW);
 
   if ((netMode == netClient) && transmit && (currKeyerMode == keyerModeIambic)) {
@@ -434,12 +438,14 @@ int playSpeed() {
 
 // MEMORY RECORDING FUNCTIONS
 
+// Record a char in the memory buffer.
 void memRecord(int memoryId, int value) {
   memory[memoryId][memorySize[memoryId]] = value;
   memorySize[memoryId]++;
 }
 
 
+// Record a memory.
 void setMemory(int memoryId, int pin, int inverted) {
   memorySize[memoryId] = 0;
   playSym(symDah, SPKR, NO_REC, 0);
@@ -448,7 +454,6 @@ void setMemory(int memoryId, int pin, int inverted) {
   delay(50);
   playSym(symDah, SPKR, NO_REC, 0);
   delay(50);
-//  digitalWrite(pinStatusLed, HIGH);
   recording = 2;
   
   while(1) {
@@ -485,8 +490,6 @@ void setMemory(int memoryId, int pin, int inverted) {
   }
   
   saveStorageMemory(memoryId);
-  
-//  digitalWrite(pinStatusLed, LOW);
   recording = 0;
 
   tone(pinSpeaker, 1300);
@@ -506,6 +509,7 @@ void setMemory(int memoryId, int pin, int inverted) {
 }
 
 
+// Play a memory. Build packet if needed.
 void playMemory(int memoryId) {
   if (memorySize[memoryId] == 0) {
     tone(pinSpeaker, 800);
@@ -558,6 +562,7 @@ void playMemory(int memoryId) {
 }
 
 
+// Read memory switches and countdown to record.
 void checkMemoryPin(int memoryId, int pin, int inverted) {
   if (readAnalog() == pin) {
     unsigned long whenStartedPress = millis();
@@ -689,7 +694,7 @@ void setup() {
   pinMode(pinStatusLed, OUTPUT);
   pinMode(pinMosfet, OUTPUT);
   pinMode(pinSpeaker, OUTPUT);
-  EEPROMr.size(4);
+  EEPROMr.size(4);                      // Create 4 memory blocks for rotation. Adjust for memory size.
   EEPROMr.begin(1024);
   loadStorage();
 
@@ -748,8 +753,8 @@ void sendPacket(unsigned int sendData, unsigned long spacing) {
 // comnpletion, passes along TX state, and memory location for recording.
 void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) {
 
-  if (ditDetected) {
-    playSym(symDit, transmit, memoryId, 0);
+  if (ditDetected) {                                                    // Insert Dit detected during
+    playSym(symDit, transmit, memoryId, 0);                             // Dah play.
     ditDetected = 0;
     playAlternate = 0;
     ditPressed = 0;
@@ -757,7 +762,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
   if (currKeyerMode == keyerModeIambic && ditPressed && dahPressed) {   // Both paddles
     if (prevSymbol == symDah) { playSym(symDit, transmit, memoryId, 0); }
     else playSym(symDah, transmit, memoryId, 1);
-    if (iambicModeB) { playAlternate = 1; }
+    if (iambicModeB) { playAlternate = 1; }                             // Trigger element cpmpletion.
   } else if (dahPressed && currKeyerMode != keyerModeStraight) {        // Dah paddle
     if (currKeyerMode == keyerModeIambic) {
       playSym(symDah, transmit, memoryId, 1);
@@ -769,11 +774,12 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
     if (currKeyerMode == keyerModeStraight) { playStraightKey(pinKeyDit); }
     else { playSym(symDit, transmit, memoryId, 0); }
   } else {                                                              // No Paddle
-    if (playAlternate) {
+    if (playAlternate) {                                                // Handle element completion.
       if (prevSymbol == symDah) { playSym(symDit, transmit, memoryId, 0); }
       else { playSym(symDah, transmit, memoryId, 1); }
       playAlternate = 0;
     }
+    // If a character packet is ready and the timing is okay, send it.
     if (toChar && (netMode == netClient) && (millis() - lastSymPlayedTime > ditMillis)) {
       toChar = toChar << (16 - (toLength * 2));
       toSend = (toLength << 16) + toChar;
@@ -785,6 +791,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
     }
     prevSymbol = 0;
   }
+  // If we have 8 elements stacked in the packet, send it!
   if (toLength == 8) {
     toChar = toChar << (16 - (toLength * 2));
     toSend = (toLength << 16) + toChar;
@@ -797,6 +804,7 @@ void processPaddles(int ditPressed, int dahPressed, int transmit, int memoryId) 
 }
 
 
+// Server mode - play a packet.
 void playPacket(DataPacket packet) {
 
   int spacing = (int)(packet.number >> 16);
@@ -829,6 +837,7 @@ void playPacket(DataPacket packet) {
 }
 
 
+// See what kind of packet came in, and queue as necessary.
 void parsePacket(DataPacket packet) {
 
   uint16_t updPacketType = packet.data >> 30;
@@ -860,6 +869,7 @@ void loop() {
   ditPressed = ditPressed & (digitalRead(pinKeyDit) == LOW);
   dahPressed = dahPressed & (digitalRead(pinKeyDah) == LOW);
 
+  // Server mode handling
   if (netMode == netServer) {
     int packetSize = udp.parsePacket();
     if (packetSize) {
@@ -867,6 +877,7 @@ void loop() {
       memcpy(&packet, frame, sizeof(packet));
       parsePacket(packet);
     }
+    // if more than 2 packets queued, trigger playback.
     if (packets.size() > 2) { playNextPacket = 1; }
     if (playNextPacket && (!packets.isEmpty())) {
       packet = packets.shift();
@@ -875,6 +886,7 @@ void loop() {
   } else if (currState == stateIdle) {
       A0_switch = readAnalog();
 
+      // Client mode keepalive
       if (lastPacketSentTime && netMode == netClient) {
         toSend  = 0;
         keepAliveTimer = millis() - lastPacketSentTime;
