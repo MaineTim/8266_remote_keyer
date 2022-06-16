@@ -1,6 +1,6 @@
 # ESP8266 Networked CW Keyer
 
-### Warning: the code in this repository is ALPHA, and although it is being used on the air successfully, likely has bugs and lots of papercuts, along with some large known limitations. If you try it, please report bugs, or file pull requests with fixes. 
+### Warning: the code in this repository is ALPHA, and although it is being used on the air successfully, likely has bugs and papercuts, along with some large known limitations. If you try it, please report bugs, or file pull requests with fixes. 
 
  This project is based on the following projects:
  Morse Code Keyer (C) 2017 Doug Hoyte  
@@ -31,23 +31,23 @@ An eeprom-rotating library was used to lessen the hit on flash by memory functio
 
 ## Where the project is now.
 
-I've been using it on the air, and the basic functionality I need is there. But this first version has limitations which need to be revisited (see below). And it is very ALPHA, as in there are likely lots of papercuts yet to be discovered.
+I've been using it on the air, and the basic functionality I need is there. But this first version has limitations which need to be revisited (see below). And it is very ALPHA, as in there are likely papercuts yet to be discovered.
 
 ## Known limitations.
 
-The biggest limitation is the use of buffering to maintain inter-character spacing, so right now there is a 2 character delay before the remote starts sending. Depending on the characters, this can range in the 1-2 second area at 20 WPM. I don't find this to be a problem in day-to-day ragchews, but it would be ugly trying to break a pileup, a contest, or other timing-critical situations.
-The remote functionality only works in iambic keyer mode.
-The network packets support characters of up to 8 elements, which is fine unless you are sending long strings of dits or dahs. If you do, the code will pause and send a packet for each 8 elements, which will cause a slight pause in the sidetone.
-The code is configured to be compiled with PlatformIO under VS Code, and has not been tested with other platforms/IDEs. The networking is hard-wired in, and depends on #defines.
+The biggest limitation is the use of buffering to maintain inter-character spacing, so right now there is a 2 character delay before the remote starts sending. Depending on the characters, this can range in the 1-2 second area at 20 WPM. I don't find this to be a problem in day-to-day ragchews, but it would be ugly trying to break a pileup, a contest, or other timing-critical situations.  
+The remote functionality only works in iambic keyer mode.  
+The network packets support characters of up to 8 elements, which is fine unless you are sending long strings of dits or dahs. If you do, the code will pause and send a packet for each 8 elements, which will cause a slight pause in the sidetone.  
+The code is configured to be compiled with PlatformIO under VS Code, and has not been tested with other platforms/IDEs. The networking is hard-wired in, and depends on #defines.  
 
 ## What's next.
 
-The first thing that will be changed is to allow selection of network function to be done by keypress at boot-up (currently #defined in code).
-Iambic mode B is currently the hardcoded selection, and that needs to be changed to allow push-button configuration.
-The buffering scheme employed got the remote code working, but I want to revisit that design and see how it could be done in a way that reduces the latency substantially.
-Setting the speed is better than it was, but it's still not really handy. I think a rotary encoder might do the trick.
-Networking configuration has to be baked in at this point, and I'd like to change that so that config could be done more flexibly.
-The whole thing needs a good code review, and that's where you come in...
+The first thing that will be changed is to allow selection of network function to be done by keypress at boot-up (currently #defined in code).  
+Iambic mode B is currently the hardcoded selection, and that needs to be changed to allow push-button configuration.  
+The buffering scheme employed got the remote code working, but I want to revisit that design and see how it could be done in a way that reduces the latency substantially.  
+Setting the speed is better than it was, but it's still not really handy. I think a rotary encoder might do the trick.  
+Networking configuration has to be baked in at this point, and I'd like to change that so that config could be done more flexibly.  
+The whole thing needs a good code review, and that's where you come in...  
 If you try the code, I'd love to hear how it goes. When you find bugs, please report them, or even better, fix them and file a pull request. 
 
 ## Basic Functions:
