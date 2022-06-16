@@ -1,11 +1,21 @@
+// ESP8266 CW Networked Keyer
+
+// Based on the following code:
 // Morse Code Keyer (C) 2017 Doug Hoyte
+// https://hoytech.com/articles/morse-code-keyer
+// https://github.com/hoytech/morse-code-keyer
 // 2-Clause BSD License
 // Modified by ea4aoj 23/04/2020
 // Modified by ea4hew 15/09/2020
-// Modified by K1BR 05/21/2022
+// https://www.eacwspain.es/2021/05/22/morse-code-keyer-esp8266/
+
+// Derivative work Copyright (C) 2022 Tim Sweeney K1BR
+// Released under 2-Clause BSD License
+
 
 // Basic Functions:
-// Press the Setup button, enter the speed configuration mode, change the speed with the paddles, to exit press the Setup button again.
+// Press the Setup button, enter the speed configuration mode, change the speed with the paddles.
+//   WPM will be announced, and you can interrupt with another key press. To exit press the Setup button again.
 // LONG press Setup button, enters tone configuration mode, change tone with the paddles, to exit press the Setup button again.
 
 // Long press on one of the memories to record memory, press Setup button when finished and it is memorized.
@@ -19,6 +29,7 @@
 // Notes on networking:
 // There is a 2 char delay on the server side to allow buffering. Inter-character timimg is preserved.
 // Networking only functions in iambic mode.
+// If you try to send a string of elements longer than 8, a packet will be sent, causing a slight pause in the sidetone.
 
 // 2022-05-22 - Translate comments and configure for Platformio. Add inital Iambic Mode B code.
 // 2022-05-23 - Move memory switches to A0.
@@ -27,7 +38,7 @@
 // 2022-05-26 - Add CW player, network init code (TODO: get network code working.)
 // 2022-06-07 - Finalize basic network code, add ring buffer, tighten timimgs.
 // 2022-06-12 - Fix memory and network playback timings.
-// 2022-06-14 - Add EEPROM-rotate library, fix paddle debounce.
+// 2022-06-14 - Add EEPROM-rotate library, fix paddle debounce, add speed annoucements.
 
 
 #include <Arduino.h>
@@ -377,37 +388,50 @@ int playSymInterruptable(int sym, int transmit, int pin, int condition) {
 
 // MORSE PLAYER FUNCTIONS
 
-void playChar(const char oneChar, int transmit) {
+int playChar(const char oneChar, int transmit) {
+  int pins[2] = { pinKeyDit, pinKeyDah };
+  int conditions[2] = { LOW, LOW };
   int inchar = 0;
+  int ret = 0;
 
   for (unsigned int j = 0; j < 8; j++) {
       int bit = morse_ascii[(int)oneChar] & (0x80 >> j);
       if (inchar) {
-          if (bit) { playSym(symDah, transmit, NO_REC, 0); }
-          else { playSym(symDit, transmit, NO_REC, 0); }
+            ret = playSymInterruptableVec(bit + 1, transmit, pins, conditions, 2);
+            if (ret != -1) {
+              waitPin(ret, HIGH);
+              return ret;
+            }
       } else if (bit) { inchar = 1; }
-  }
+ }
   delay(ditMillis * 2);
+  return 0;
 }
 
 
-void playStr(const char *oneString, int transmit) {
+int playStr(const char *oneString, int transmit) {
 
   for (unsigned int j = 0; j < strlen(oneString); j++) {
     if (oneString[j] == ' ') { delay(ditMillis * 7); }
-    else { playChar(oneString[j], transmit); }
+    else { 
+      int ret = playChar(oneString[j], transmit);
+      if (ret != 0) { return ret; }
+    }
   }
+  return 0;
 }
 
 
-void playSpeed() {
+int playSpeed() {
 
   char frame[10];
-
-  itoa(ditMillis, frame, 10);
+  int speed = 1200 / ditMillis;
+  itoa(speed, frame, 10);
   delay(250);
-  playStr(frame, SPKR);
+  int ret = playStr(frame, SPKR);
+  if (ret) { return ret; }
   delay(250);
+  return 0;
 }
 
 
@@ -668,6 +692,7 @@ void setup() {
   loadStorage();
 
   playSpeed();
+  delay(250);
   
 #ifdef CLIENT
   netMode = netClient;
@@ -921,9 +946,22 @@ void loop() {
       waitPin(pinSetup, HIGH);
       return;
     }
-    if (ditPressed) { ditMillis = scaleDown(ditMillis, 1/1.05, 20); }
-    if (dahPressed) { ditMillis = scaleUp(ditMillis, 1.05, 800); }
-    if (ditPressed || dahPressed) { playSpeed(); }
+    while (ditPressed || dahPressed) {
+      if (ditPressed) { ditMillis = scaleDown(ditMillis, 1/1.05, 20); }
+      if (dahPressed) { ditMillis = scaleUp(ditMillis, 1.05, 800); }
+      int ret = playSpeed(); 
+      switch (ret) {
+        case pinKeyDit:  
+          ditPressed = true;
+          break;
+        case pinKeyDah:
+          dahPressed = true;
+          break;
+        default:
+          ditPressed = false;
+          dahPressed = false;
+      }
+    }
   } else if (currState == stateSettingTone) {
     if (playSymInterruptable(symDit, 0, pinSetup, LOW) != -1) {
       currState = stateIdle;
