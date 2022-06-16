@@ -4,12 +4,12 @@
 
  This project is based on the following projects:
  Morse Code Keyer (C) 2017 Doug Hoyte  
- https:hoytech.com/articles/morse-code-keyer  
- https:github.com/hoytech/morse-code-keyer  
+ https://hoytech.com/articles/morse-code-keyer  
+ https://github.com/hoytech/morse-code-keyer  
  2-Clause BSD License  
  Modified by ea4aoj 23/04/2020  
  Modified by ea4hew 15/09/2020  
- https:www.eacwspain.es/2021/05/22/morse-code-keyer-esp8266/
+ https://www.eacwspain.es/2021/05/22/morse-code-keyer-esp8266/
 
 ## How the project started.
 
@@ -74,4 +74,4 @@ Press the Setup button and hold it while immediately pressing a memory button to
  2: Switch to staright key by pressing Memory2.
  3: Switch to vibroplex by pressing Memory3.
 
-![breadboard image] (keyer_bb.png)
+![breadboard image](keyer_bb.png)
