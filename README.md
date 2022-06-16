@@ -35,8 +35,8 @@ I've been using it on the air, and the basic functionality I need is there. But 
 
 ## Known limitations.
 
+The biggest limitation is the use of buffering to maintain inter-character spacing, so right now there is a 2 character delay before the remote starts sending. Depending on the characters, this can range in the 1-2 second area at 20 WPM. I don't find this to be a problem in day-to-day ragchews, but it would be ugly trying to break a pileup, a contest, or other timing-critical situations.
 The remote functionality only works in iambic keyer mode.
-It uses buffering to maintain inter-character spacing, so right now there is a 2 character delay before the remote starts sending. I don't find this to be a problem in day-to-day ragchews, but it would be ugly trying to break a pileup, or other timing-critical situations.
 The network packets support characters of up to 8 elements, which is fine unless you are sending long strings of dits or dahs. If you do, the code will pause and send a packet for each 8 elements, which will cause a slight pause in the sidetone.
 The code is configured to be compiled with PlatformIO under VS Code, and has not been tested with other platforms/IDEs. The networking is hard-wired in, and depends on #defines.
 

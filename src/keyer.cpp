@@ -878,7 +878,7 @@ void loop() {
       if (lastPacketSentTime && netMode == netClient) {
         toSend  = 0;
         keepAliveTimer = millis() - lastPacketSentTime;
-        if (keepAliveTimer > 2000 && (!ditPressed && !dahPressed) && !toChar) {
+        if (keepAliveTimer > 1000 && (!ditPressed && !dahPressed) && !toChar) {
           sendPacket((udpKeepAlive << 30) + ditMillis, 0);
           lastPacketType = udpKeepAlive;
           toSend = 0;
