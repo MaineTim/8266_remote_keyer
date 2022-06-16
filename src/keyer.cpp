@@ -15,7 +15,7 @@
 
 // Basic Functions:
 // Press the Setup button, enter the speed configuration mode, change the speed with the paddles.
-//   WPM will be announced, and you can interrupt with another key press. To exit press the Setup button again.
+// WPM will be announced, and you can interrupt with another key press. To exit press the Setup button again.
 // LONG press Setup button, enters tone configuration mode, change tone with the paddles, to exit press the Setup button again.
 
 // Long press on one of the memories to record memory, press Setup button when finished and it is memorized.
@@ -192,7 +192,7 @@ CircularBuffer < DataPacket, 10> packets;
 int currState = stateIdle;
 int prevSymbol = 0; // 0=none, 1=dit, 2=dah
 int recording = 0;
-int currStorageOffset = 0;
+int currStorageOffset = 3;
 int playAlternate = 0;                  // Mode B completion flag
 int ditDetected = 0;                    // Dit paddle hit during Dah play
 int memSwitch = 0;                      // Memory switch set by readAnalog()
@@ -297,7 +297,7 @@ void saveStorageMemory(int memoryId) {
 
 
 void dumpSettingsToStorage() {
-  currStorageOffset = 2;
+  currStorageOffset = 5;
   saveStorageInt(packetTypeSpeed, ditMillis);
   saveStorageInt(packetTypeFreq, toneFreq);
   if (currKeyerMode == keyerModeVibroplex) { saveStorageEmptyPacket(packetTypeKeyerModeVibroplex); }
@@ -614,11 +614,11 @@ int scaleUp(int orig, double factor, int upperLimit) {
 // INITIALIZATION FUNCTIONS
 
 void factoryReset() {
-  if (EEPROMr.read(0) != storageMagic1) EEPROMr.write(0, storageMagic1);
-  if (EEPROMr.read(1) != storageMagic2) EEPROMr.write(1, storageMagic2);
-  if (EEPROMr.read(2) != packetTypeEnd) EEPROMr.write(2, packetTypeEnd);
+  if (EEPROMr.read(3) != storageMagic1) EEPROMr.write(0, storageMagic1);
+  if (EEPROMr.read(4) != storageMagic2) EEPROMr.write(1, storageMagic2);
+  if (EEPROMr.read(5) != packetTypeEnd) EEPROMr.write(2, packetTypeEnd);
 
-  currStorageOffset = 2;
+  currStorageOffset = 5;
 
   tone(pinSpeaker, 900);
   delay(300);
@@ -631,12 +631,17 @@ void factoryReset() {
 
 
 void loadStorage() {
-  // Reset the configuration by pressing the Setup and Memory1 buttons while the keyer is turned on
+  // Reset the configuration byng both paddles while the keyer is started.
+  // Memory layout:
+  // Bytes 0, 2, 1 : Reserved for rotation library signature.
+  // Bytes 3, 4 : Reserved for magic numbers.
+  // Bytes 5 - 1024 : memory packets.
+
   int resetRequested = (digitalRead(pinKeyDit) == LOW) && (digitalRead(pinKeyDah) == LOW);
 
-  if (resetRequested || EEPROMr.read(0) != storageMagic1 || EEPROMr.read(1) != storageMagic2) { factoryReset(); }
+  if (resetRequested || EEPROMr.read(3) != storageMagic1 || EEPROMr.read(4) != storageMagic2) { factoryReset(); }
 
-  currStorageOffset = 2;
+  currStorageOffset = 5;
   
   while (1) {
     int packetType = EEPROMr.read(currStorageOffset);
